@@ -101,9 +101,9 @@ public final class MainActivity extends Activity {
     }
 
     public final class Bridge {
-        @JavascriptInterface public boolean saveConfig(String user, String password, String topic) {
+        @JavascriptInterface public boolean saveConfig(String user, String password, String ignoredTopic) {
             try {
-                SecureConfig.save(MainActivity.this, user, password, topic);
+                SecureConfig.save(MainActivity.this, user, password, SecureConfig.DEFAULT_TOPIC);
                 lastStatus = "Connexion automatique active";
                 startMqttService();
                 return true;
@@ -122,7 +122,7 @@ public final class MainActivity extends Activity {
             try {
                 JSONObject j = new JSONObject();
                 j.put("user", SecureConfig.user(MainActivity.this));
-                j.put("topic", SecureConfig.topic(MainActivity.this));
+                j.put("topic", SecureConfig.DEFAULT_TOPIC);
                 j.put("status", lastStatus);
                 j.put("topicReceived", lastTopic);
                 j.put("payload", lastPayload);
