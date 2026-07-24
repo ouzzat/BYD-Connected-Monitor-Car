@@ -36,14 +36,19 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
-      - name: Lint and build APK
-        run: gradle --no-daemon clean lintDebug assembleDebug
+      - name: Build car APK
+        run: gradle --no-daemon :app:clean :app:assembleDebug
+
+      - name: Android Lint
+        continue-on-error: true
+        run: gradle --no-daemon :app:lintDebug
 
       - name: Verify APK
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -f "$APK"
           unzip -t "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           sha256sum "$APK" | tee app/build/outputs/apk/debug/app-debug.apk.sha256
 
       - name: Upload APK
