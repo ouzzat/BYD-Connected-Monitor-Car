@@ -14,7 +14,6 @@ import android.widget.*;
 public final class MainActivity extends Activity {
     private EditText user;
     private EditText pass;
-    private EditText topic;
     private TextView status;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -32,16 +31,14 @@ public final class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(8, 14, 20));
 
         TextView title = label("BYD Connected Monitor — Car Agent", 28, Color.WHITE);
-        TextView server = label("HiveMQ Cloud intégré • TLS 8883", 17, Color.rgb(55, 220, 170));
+        TextView server = label("HiveMQ Cloud intégré • TLS 8883\nasmontec/byd/seal-u", 17, Color.rgb(55, 220, 170));
         server.setPadding(0, 8, 0, 22);
         root.addView(title); root.addView(server);
 
         user = field("Utilisateur HiveMQ", InputType.TYPE_CLASS_TEXT);
         pass = field("Mot de passe HiveMQ", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        topic = field("Préfixe MQTT", InputType.TYPE_CLASS_TEXT);
         user.setText(SecureConfig.user(this));
-        topic.setText(SecureConfig.topic(this));
-        root.addView(user); root.addView(pass); root.addView(topic);
+        root.addView(user); root.addView(pass);
 
         Button start = new Button(this);
         start.setText("ENREGISTRER ET DÉMARRER EN ARRIÈRE-PLAN");
@@ -57,7 +54,7 @@ public final class MainActivity extends Activity {
         });
         root.addView(stop);
 
-        status = label(SecureConfig.enabled(this) ? "Service configuré" : "Configuration requise", 18, Color.LTGRAY);
+        status = label(SecureConfig.enabled(this) ? "Service configuré" : "Identifiants HiveMQ requis", 18, Color.LTGRAY);
         status.setPadding(0, 20, 0, 0);
         root.addView(status);
         return root;
@@ -69,7 +66,7 @@ public final class MainActivity extends Activity {
                 status.setText("Utilisateur HiveMQ requis");
                 return;
             }
-            SecureConfig.save(this, user.getText().toString(), pass.getText().toString(), topic.getText().toString());
+            SecureConfig.save(this, user.getText().toString(), pass.getText().toString(), SecureConfig.DEFAULT_TOPIC);
             pass.setText("");
             startAgent();
             status.setText("Agent actif • publication toutes les 5 secondes");
