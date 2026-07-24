@@ -27,9 +27,15 @@ final class SecureConfig {
         SharedPreferences.Editor e = c.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit();
         e.putString("user", user == null ? "" : user.trim());
         e.putString("topic", normalizeTopic(topic));
-        e.putString("password", encrypt(password == null ? "" : password));
+        if (password != null && !password.isEmpty()) {
+            e.putString("password", encrypt(password));
+        }
         e.putBoolean("enabled", true);
         e.apply();
+    }
+
+    static void disable(Context c) {
+        c.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean("enabled", false).apply();
     }
 
     static boolean isEnabled(Context c) {
@@ -73,6 +79,7 @@ final class SecureConfig {
 
     private static String decrypt(String value) throws Exception {
         String[] p = value.split("\\.", 2);
+        if (p.length != 2) return "";
         Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
         c.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, Base64.decode(p[0], Base64.NO_WRAP)));
         return new String(c.doFinal(Base64.decode(p[1], Base64.NO_WRAP)), StandardCharsets.UTF_8);
