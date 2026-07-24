@@ -1,10 +1,17 @@
 package ma.asmontec.bydmonitor.mobile;
 
+import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -16,370 +23,257 @@ import android.widget.TextView;
 
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
 
 public final class MainActivity extends Activity {
-    private final Handler ui = new Handler(Looper.getMainLooper());
-    private final AtomicBoolean running = new AtomicBoolean(false);
+    private static final int BG = Color.rgb(4, 9, 14);
+    private static final int CARD = Color.rgb(15, 23, 31);
+    private static final int ACCENT = Color.rgb(22, 214, 165);
+    private LinearLayout content;
+    private TextView status;
+    private TextView speed;
+    private TextView battery;
+    private TextView power;
+    private TextView range;
+    private TextView position;
+    private TextView lastUpdate;
+    private TextView raw;
 
-    private EditText hostField;
-    private EditText portField;
-    private EditText userField;
-    private EditText passField;
-    private EditText topicField;
-    private TextView connectionView;
-    private TextView speedView;
-    private TextView batteryView;
-    private TextView positionView;
-    private TextView updatedView;
-    private TextView rawView;
-    private Button connectButton;
+    private final BroadcastReceiver receiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            String s = intent.getStringExtra(MqttBackgroundService.EXTRA_STATUS);
+            if (s != null) status.setText(s);
+            String payload = intent.getStringExtra(MqttBackgroundService.EXTRA_PAYLOAD);
+            String topic = intent.getStringExtra(MqttBackgroundService.EXTRA_TOPIC);
+            if (payload != null) applyData(topic, payload);
+        }
+    };
 
-    private volatile SSLSocket socket;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(createUi());
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 10);
+        }
+        setContentView(buildUi());
+        showHome();
+        if (SecureConfig.isEnabled(this)) startMqttService();
     }
 
-    @Override
-    protected void onDestroy() {
-        disconnect();
-        super.onDestroy();
+    @Override protected void onStart() {
+        super.onStart();
+        IntentFilter f = new IntentFilter(MqttBackgroundService.ACTION_DATA);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, f, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(receiver, f);
     }
 
-    private View createUi() {
-        ScrollView scroll = new ScrollView(this);
+    @Override protected void onStop() {
+        try { unregisterReceiver(receiver); } catch (Exception ignored) {}
+        super.onStop();
+    }
+
+    private View buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(20), dp(18), dp(30));
-        root.setBackgroundColor(Color.rgb(10, 16, 24));
-        scroll.addView(root);
+        root.setBackgroundColor(BG);
 
-        TextView title = text("BYD Monitor Mobile", 28, Color.WHITE, true);
-        title.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.addView(title);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(18), dp(18), dp(18), dp(12));
+        TextView title = label("BYD SEAL U DM-i", 23, Color.WHITE, true);
+        status = label(SecureConfig.isEnabled(this) ? "Connexion automatique active" : "Configuration requise", 14, ACCENT, false);
+        header.addView(title);
+        header.addView(status);
+        root.addView(header);
 
-        TextView subtitle = text("Compagnon sécurisé en lecture seule", 15, Color.rgb(105, 210, 255), false);
-        subtitle.setGravity(Gravity.CENTER_HORIZONTAL);
-        subtitle.setPadding(0, dp(4), 0, dp(18));
-        root.addView(subtitle);
+        ScrollView scroll = new ScrollView(this);
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), dp(4), dp(14), dp(20));
+        scroll.addView(content);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        root.addView(section("Connexion MQTT TLS"));
-        hostField = field("Serveur MQTT (ex. mqtt.example.com)", InputType.TYPE_CLASS_TEXT);
-        portField = field("Port TLS", InputType.TYPE_CLASS_NUMBER);
-        userField = field("Utilisateur", InputType.TYPE_CLASS_TEXT);
-        passField = field("Mot de passe (non enregistré)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        topicField = field("Préfixe topic (ex. asmontec/byd/vehicule1)", InputType.TYPE_CLASS_TEXT);
-
-        android.content.SharedPreferences prefs = getSharedPreferences("config", MODE_PRIVATE);
-        hostField.setText(prefs.getString("host", ""));
-        portField.setText(prefs.getString("port", "8883"));
-        userField.setText(prefs.getString("user", ""));
-        topicField.setText(prefs.getString("topic", "asmontec/byd/vehicle"));
-
-        root.addView(hostField);
-        root.addView(portField);
-        root.addView(userField);
-        root.addView(passField);
-        root.addView(topicField);
-
-        connectButton = new Button(this);
-        connectButton.setText("SE CONNECTER");
-        connectButton.setOnClickListener(v -> {
-            if (running.get()) disconnect(); else connect();
-        });
-        root.addView(connectButton);
-
-        connectionView = card("Déconnecté", 20);
-        root.addView(connectionView);
-
-        root.addView(section("Données du véhicule"));
-        speedView = card("Vitesse GPS\n— km/h", 22);
-        batteryView = card("Batterie unité Android\n— %", 22);
-        positionView = card("Position\n—", 17);
-        updatedView = card("Dernière mise à jour\n—", 15);
-        rawView = card("Dernier message brut\n—", 13);
-        root.addView(speedView);
-        root.addView(batteryView);
-        root.addView(positionView);
-        root.addView(updatedView);
-        root.addView(rawView);
-
-        return scroll;
+        LinearLayout nav = new LinearLayout(this);
+        nav.setPadding(dp(4), dp(6), dp(4), dp(8));
+        nav.setBackgroundColor(Color.rgb(8, 14, 20));
+        addNav(nav, "Accueil", v -> showHome());
+        addNav(nav, "État", v -> showTelemetry());
+        addNav(nav, "Carte", v -> showMap());
+        addNav(nav, "Caméras", v -> showCameras());
+        addNav(nav, "Plus", v -> showMore());
+        root.addView(nav);
+        return root;
     }
 
-    private TextView section(String value) {
-        TextView v = text(value, 18, Color.WHITE, true);
-        v.setPadding(0, dp(18), 0, dp(8));
-        return v;
+    private void addNav(LinearLayout nav, String text, View.OnClickListener click) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextColor(Color.WHITE);
+        b.setTextSize(12);
+        b.setBackgroundColor(Color.TRANSPARENT);
+        b.setOnClickListener(click);
+        nav.addView(b, new LinearLayout.LayoutParams(0, dp(52), 1f));
     }
 
-    private EditText field(String hint, int type) {
-        EditText e = new EditText(this);
-        e.setHint(hint);
-        e.setHintTextColor(Color.rgb(145, 158, 171));
-        e.setTextColor(Color.WHITE);
-        e.setInputType(type);
-        e.setSingleLine(true);
-        e.setPadding(dp(12), dp(10), dp(12), dp(10));
-        return e;
+    private void showHome() {
+        content.removeAllViews();
+        content.addView(hero("Véhicule connecté", "Vue en temps réel sécurisée"));
+        LinearLayout row = row();
+        battery = metric("Batterie", "— %");
+        range = metric("Autonomie EV", "— km");
+        row.addView(battery, weighted()); row.addView(range, weighted());
+        content.addView(row);
+        LinearLayout row2 = row();
+        speed = metric("Vitesse", "— km/h");
+        power = metric("Puissance", "— kW");
+        row2.addView(speed, weighted()); row2.addView(power, weighted());
+        content.addView(row2);
+        content.addView(card("État du véhicule", "En attente des données BYD DiLink"));
+        lastUpdate = card("Dernière mise à jour", "—");
+        content.addView(lastUpdate);
     }
 
-    private TextView card(String value, int size) {
-        TextView v = text(value, size, Color.WHITE, false);
-        v.setBackgroundColor(Color.rgb(22, 32, 45));
-        v.setPadding(dp(15), dp(14), dp(15), dp(14));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, dp(6), 0, dp(6));
-        v.setLayoutParams(lp);
-        return v;
+    private void showTelemetry() {
+        content.removeAllViews();
+        content.addView(section("État en temps réel"));
+        speed = metric("Vitesse GPS", "— km/h");
+        power = metric("Puissance", "— kW");
+        battery = metric("Batterie SOC", "— %");
+        range = metric("Autonomie", "— km");
+        content.addView(speed); content.addView(power); content.addView(battery); content.addView(range);
+        raw = card("Dernier message MQTT", "Aucune donnée reçue");
+        content.addView(raw);
     }
 
-    private TextView text(String value, int size, int color, boolean bold) {
-        TextView v = new TextView(this);
-        v.setText(value);
-        v.setTextSize(size);
-        v.setTextColor(color);
-        if (bold) v.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        return v;
+    private void showMap() {
+        content.removeAllViews();
+        content.addView(section("Localisation"));
+        TextView map = card("Carte sombre", "Le tracé GPS apparaîtra ici dès réception des coordonnées.");
+        map.setMinHeight(dp(320)); map.setGravity(Gravity.CENTER);
+        content.addView(map);
+        position = card("Position actuelle", "—");
+        content.addView(position);
     }
 
-    private void connect() {
-        final String host = hostField.getText().toString().trim();
-        final String portText = portField.getText().toString().trim();
-        final String user = userField.getText().toString();
-        final String pass = passField.getText().toString();
-        final String prefix = normalizeTopic(topicField.getText().toString());
+    private void showCameras() {
+        content.removeAllViews();
+        content.addView(section("Caméras"));
+        TextView live = card("Flux en direct", "Aucune caméra compatible détectée pour le moment.");
+        live.setMinHeight(dp(300)); live.setGravity(Gravity.CENTER);
+        content.addView(live);
+        content.addView(card("Sécurité", "Le flux vidéo ne sera activé qu’après validation sur le véhicule."));
+    }
 
-        if (host.isEmpty() || portText.isEmpty() || prefix.isEmpty()) {
-            setStatus("Configuration incomplète", Color.rgb(255, 183, 77));
-            return;
-        }
+    private void showMore() {
+        content.removeAllViews();
+        content.addView(section("Plus"));
+        content.addView(action("Paramètres de connexion", v -> showConfig()));
+        content.addView(action("Notifications", v -> message("Notifications intelligentes activées via le service MQTT.")));
+        content.addView(action("Événements", v -> message("Les événements portes, trajets et charge seront affichés dès leur réception.")));
+        content.addView(action("Sécurité", v -> message("TLS obligatoire, aucun trafic HTTP clair, mot de passe chiffré par Android Keystore.")));
+        content.addView(action("Déconnecter", v -> disconnect()));
+    }
 
-        final int port;
-        try { port = Integer.parseInt(portText); }
-        catch (NumberFormatException e) {
-            setStatus("Port invalide", Color.rgb(255, 107, 107));
-            return;
-        }
+    private void showConfig() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(18), dp(8), dp(18), 0);
+        EditText user = input("Utilisateur HiveMQ", InputType.TYPE_CLASS_TEXT);
+        EditText pass = input("Mot de passe HiveMQ", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        EditText topic = input("Préfixe MQTT", InputType.TYPE_CLASS_TEXT);
+        user.setText(SecureConfig.user(this));
+        topic.setText(SecureConfig.topic(this));
+        box.addView(user); box.addView(pass); box.addView(topic);
+        new AlertDialog.Builder(this)
+                .setTitle("Connexion HiveMQ Cloud")
+                .setMessage(SecureConfig.DEFAULT_HOST + ":" + SecureConfig.DEFAULT_PORT)
+                .setView(box)
+                .setNegativeButton("Annuler", null)
+                .setPositiveButton("Enregistrer", (d, w) -> {
+                    try {
+                        SecureConfig.save(this, user.getText().toString(), pass.getText().toString(), topic.getText().toString());
+                        startMqttService();
+                        status.setText("Connexion automatique active");
+                    } catch (Exception e) { message("Erreur de chiffrement : " + e.getMessage()); }
+                }).show();
+    }
 
-        getSharedPreferences("config", MODE_PRIVATE).edit()
-                .putString("host", host)
-                .putString("port", portText)
-                .putString("user", user)
-                .putString("topic", prefix)
-                .apply();
-
-        running.set(true);
-        connectButton.setText("DÉCONNECTER");
-        setStatus("Connexion…", Color.rgb(255, 213, 79));
-
-        new Thread(() -> mqttLoop(host, port, user, pass, prefix), "mqtt-mobile").start();
+    private void startMqttService() {
+        Intent i = new Intent(this, MqttBackgroundService.class);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
     }
 
     private void disconnect() {
-        running.set(false);
-        try { if (socket != null) socket.close(); } catch (Exception ignored) {}
-        socket = null;
-        ui.post(() -> {
-            connectButton.setText("SE CONNECTER");
-            setStatus("Déconnecté", Color.LTGRAY);
-        });
+        SecureConfig.disable(this);
+        stopService(new Intent(this, MqttBackgroundService.class));
+        status.setText("Déconnecté");
+        message("Connexion automatique désactivée.");
     }
 
-    private void mqttLoop(String host, int port, String user, String pass, String prefix) {
-        int retrySeconds = 2;
-        while (running.get()) {
-            try {
-                SSLContext context = SSLContext.getInstance("TLS");
-                context.init(null, null, new SecureRandom());
-                SSLSocketFactory factory = context.getSocketFactory();
-                SSLSocket ssl = (SSLSocket) factory.createSocket(host, port);
-                SSLParameters parameters = ssl.getSSLParameters();
-                parameters.setEndpointIdentificationAlgorithm("HTTPS");
-                ssl.setSSLParameters(parameters);
-                ssl.setEnabledProtocols(selectTls(ssl.getSupportedProtocols()));
-                ssl.setSoTimeout(45000);
-                ssl.startHandshake();
-                socket = ssl;
-
-                OutputStream out = ssl.getOutputStream();
-                DataInputStream in = new DataInputStream(ssl.getInputStream());
-                sendConnect(out, user, pass);
-                int type = in.readUnsignedByte();
-                int len = readRemainingLength(in);
-                byte[] response = new byte[len];
-                in.readFully(response);
-                if ((type >> 4) != 2 || len < 2 || response[1] != 0) {
-                    throw new IllegalStateException("Connexion MQTT refusée");
-                }
-
-                sendSubscribe(out, prefix + "/#");
-                ui.post(() -> setStatus("Connecté — TLS actif", Color.rgb(102, 255, 178)));
-                retrySeconds = 2;
-
-                while (running.get()) {
-                    int header = in.readUnsignedByte();
-                    int remaining = readRemainingLength(in);
-                    byte[] packet = new byte[remaining];
-                    in.readFully(packet);
-                    int packetType = header >> 4;
-                    if (packetType == 3) handlePublish(packet);
-                    else if (packetType == 13) { /* PINGRESP */ }
-                }
-            } catch (Exception e) {
-                if (!running.get()) break;
-                String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                ui.post(() -> setStatus("Reconnexion: " + message, Color.rgb(255, 138, 101)));
-                try { Thread.sleep(retrySeconds * 1000L); } catch (InterruptedException ignored) {}
-                retrySeconds = Math.min(30, retrySeconds * 2);
-            } finally {
-                try { if (socket != null) socket.close(); } catch (Exception ignored) {}
-                socket = null;
-            }
-        }
-    }
-
-    private void handlePublish(byte[] packet) {
-        if (packet.length < 2) return;
-        int topicLength = ((packet[0] & 0xff) << 8) | (packet[1] & 0xff);
-        int start = 2 + topicLength;
-        if (topicLength < 0 || start > packet.length) return;
-        String topic = new String(packet, 2, topicLength, StandardCharsets.UTF_8);
-        String payload = new String(packet, start, packet.length - start, StandardCharsets.UTF_8);
-        ui.post(() -> updateDashboard(topic, payload));
-    }
-
-    private void updateDashboard(String topic, String payload) {
-        rawView.setText("Dernier message brut\n" + topic + "\n" + limit(payload, 500));
-        updatedView.setText("Dernière mise à jour\n" + new java.text.SimpleDateFormat(
-                "dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(new java.util.Date()));
-
+    private void applyData(String topic, String payload) {
         try {
-            JSONObject json = new JSONObject(payload);
-            Double speed = number(json, "speedKmh", "speed_kmh", "speed");
-            Double battery = number(json, "androidBattery", "android_battery", "battery");
-            Double lat = number(json, "latitude", "lat");
-            Double lon = number(json, "longitude", "lon", "lng");
-
-            if (speed != null) speedView.setText(String.format(Locale.getDefault(), "Vitesse GPS\n%.1f km/h", speed));
-            if (battery != null) batteryView.setText(String.format(Locale.getDefault(), "Batterie unité Android\n%.0f %%", battery));
-            if (lat != null && lon != null) positionView.setText(String.format(Locale.US, "Position\n%.6f, %.6f", lat, lon));
+            JSONObject j = new JSONObject(payload);
+            Double s = number(j, "speedKmh", "speed_kmh", "speed");
+            Double b = number(j, "soc", "batterySoc", "battery");
+            Double p = number(j, "powerKw", "power_kw", "power");
+            Double r = number(j, "rangeKm", "range_km", "range");
+            Double lat = number(j, "latitude", "lat");
+            Double lon = number(j, "longitude", "lon", "lng");
+            if (speed != null && s != null) speed.setText("Vitesse\n" + String.format(Locale.getDefault(), "%.1f km/h", s));
+            if (battery != null && b != null) battery.setText("Batterie\n" + String.format(Locale.getDefault(), "%.0f %%", b));
+            if (power != null && p != null) power.setText("Puissance\n" + String.format(Locale.getDefault(), "%.1f kW", p));
+            if (range != null && r != null) range.setText("Autonomie\n" + String.format(Locale.getDefault(), "%.0f km", r));
+            if (position != null && lat != null && lon != null) position.setText(String.format(Locale.US, "Position actuelle\n%.6f, %.6f", lat, lon));
+            if (lastUpdate != null) lastUpdate.setText("Dernière mise à jour\n" + new SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(new Date()));
+            if (raw != null) raw.setText("Dernier message MQTT\n" + topic + "\n" + payload);
         } catch (Exception ignored) {
-            // Les messages texte restent visibles dans la carte brute.
+            if (raw != null) raw.setText("Dernier message MQTT\n" + payload);
         }
     }
 
-    private static Double number(JSONObject json, String... keys) {
-        for (String key : keys) {
-            if (json.has(key) && !json.isNull(key)) {
-                try { return json.getDouble(key); } catch (Exception ignored) {}
-            }
-        }
+    private static Double number(JSONObject j, String... keys) {
+        for (String k : keys) if (j.has(k) && !j.isNull(k)) try { return j.getDouble(k); } catch (Exception ignored) {}
         return null;
     }
 
-    private void sendConnect(OutputStream out, String user, String pass) throws Exception {
-        ByteArrayOutputStream variable = new ByteArrayOutputStream();
-        writeUtf(variable, "MQTT");
-        variable.write(4);
-        int flags = 0x02;
-        if (!user.isEmpty()) flags |= 0x80;
-        if (!pass.isEmpty()) flags |= 0x40;
-        variable.write(flags);
-        variable.write(0);
-        variable.write(30);
-        writeUtf(variable, "byd-mobile-" + Long.toHexString(System.nanoTime()));
-        if (!user.isEmpty()) writeUtf(variable, user);
-        if (!pass.isEmpty()) writeUtf(variable, pass);
-        writePacket(out, 0x10, variable.toByteArray());
+    private TextView hero(String a, String b) {
+        TextView v = card(a, b + "\n\nBYD SEAL U DM-i");
+        v.setMinHeight(dp(190)); v.setGravity(Gravity.CENTER);
+        return v;
     }
 
-    private void sendSubscribe(OutputStream out, String topic) throws Exception {
-        ByteArrayOutputStream payload = new ByteArrayOutputStream();
-        payload.write(0);
-        payload.write(1);
-        writeUtf(payload, topic);
-        payload.write(0);
-        writePacket(out, 0x82, payload.toByteArray());
+    private TextView section(String text) {
+        TextView v = label(text, 24, Color.WHITE, true);
+        v.setPadding(dp(4), dp(12), 0, dp(12));
+        return v;
     }
 
-    private static void writePacket(OutputStream out, int header, byte[] body) throws Exception {
-        out.write(header);
-        writeRemainingLength(out, body.length);
-        out.write(body);
-        out.flush();
+    private TextView metric(String title, String value) {
+        TextView v = label(title + "\n" + value, 20, Color.WHITE, true);
+        styleCard(v); v.setGravity(Gravity.CENTER); v.setMinHeight(dp(110));
+        return v;
     }
 
-    private static void writeUtf(OutputStream out, String value) throws Exception {
-        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        out.write((bytes.length >> 8) & 0xff);
-        out.write(bytes.length & 0xff);
-        out.write(bytes);
+    private TextView card(String title, String value) {
+        TextView v = label(title + "\n" + value, 16, Color.WHITE, false);
+        styleCard(v); return v;
     }
 
-    private static void writeRemainingLength(OutputStream out, int value) throws Exception {
-        do {
-            int digit = value % 128;
-            value /= 128;
-            if (value > 0) digit |= 0x80;
-            out.write(digit);
-        } while (value > 0);
+    private Button action(String text, View.OnClickListener l) {
+        Button b = new Button(this); b.setText(text); b.setTextColor(Color.WHITE); b.setTextSize(16); b.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); b.setBackgroundColor(CARD); b.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(60)); lp.setMargins(0, dp(5), 0, dp(5)); b.setLayoutParams(lp); return b;
     }
 
-    private static int readRemainingLength(DataInputStream in) throws Exception {
-        int multiplier = 1;
-        int value = 0;
-        int digit;
-        do {
-            digit = in.readUnsignedByte();
-            value += (digit & 127) * multiplier;
-            multiplier *= 128;
-            if (multiplier > 128 * 128 * 128 * 128) throw new IllegalStateException("Paquet MQTT invalide");
-        } while ((digit & 128) != 0);
-        return value;
+    private void styleCard(TextView v) {
+        v.setBackgroundColor(CARD); v.setPadding(dp(16), dp(16), dp(16), dp(16));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.setMargins(dp(4), dp(5), dp(4), dp(5)); v.setLayoutParams(lp);
     }
 
-    private static String[] selectTls(String[] supported) {
-        java.util.ArrayList<String> selected = new java.util.ArrayList<>();
-        for (String protocol : supported) {
-            if ("TLSv1.3".equals(protocol) || "TLSv1.2".equals(protocol)) selected.add(protocol);
-        }
-        return selected.toArray(new String[0]);
-    }
-
-    private void setStatus(String text, int color) {
-        connectionView.setText(text);
-        connectionView.setTextColor(color);
-    }
-
-    private static String normalizeTopic(String value) {
-        String t = value == null ? "" : value.trim();
-        while (t.startsWith("/")) t = t.substring(1);
-        while (t.endsWith("/")) t = t.substring(0, t.length() - 1);
-        return t;
-    }
-
-    private static String limit(String value, int max) {
-        return value.length() <= max ? value : value.substring(0, max) + "…";
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
+    private LinearLayout row() { LinearLayout r = new LinearLayout(this); r.setOrientation(LinearLayout.HORIZONTAL); return r; }
+    private LinearLayout.LayoutParams weighted() { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -2, 1f); p.setMargins(dp(3), 0, dp(3), 0); return p; }
+    private TextView label(String t, int s, int c, boolean bold) { TextView v = new TextView(this); v.setText(t); v.setTextSize(s); v.setTextColor(c); if (bold) v.setTypeface(Typeface.DEFAULT_BOLD); return v; }
+    private EditText input(String hint, int type) { EditText e = new EditText(this); e.setHint(hint); e.setInputType(type); e.setSingleLine(true); return e; }
+    private void message(String s) { new AlertDialog.Builder(this).setMessage(s).setPositiveButton("OK", null).show(); }
+    private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 }
