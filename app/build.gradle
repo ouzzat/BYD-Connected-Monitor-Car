@@ -1,0 +1,37 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.asmontec.bydavm.car'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.asmontec.bydavm.car'
+        minSdk 23
+        targetSdk 28
+        versionCode 6
+        versionName '0.6.0-security-audited'
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+        release {
+            debuggable false
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        abortOnError true
+        checkReleaseBuilds true
+        disable 'ExpiredTargetSdkVersion'
+    }
+}
