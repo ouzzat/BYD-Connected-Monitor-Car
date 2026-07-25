@@ -12,8 +12,8 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 
 /**
@@ -76,11 +76,15 @@ public final class MiniMqttClient {
         socket = (SSLSocket) context.getSocketFactory().createSocket(plain, host, port, true);
         socket.setEnabledProtocols(intersectPreferred(socket.getSupportedProtocols(), "TLSv1.3", "TLSv1.2"));
 
-        SSLParameters params = socket.getSSLParameters();
-        params.setEndpointIdentificationAlgorithm("HTTPS");
-        socket.setSSLParameters(params);
         socket.setUseClientMode(true);
         socket.startHandshake();
+
+        // setEndpointIdentificationAlgorithm() nécessite l'API 24 ; minSdk est 23,
+        // donc la vérification du nom d'hôte est faite manuellement après la
+        // poignée de main, avec le vérificateur HTTPS standard d'Android.
+        if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, socket.getSession())) {
+            throw new IOException("Le nom d'hôte ne correspond pas au certificat présenté (" + host + ")");
+        }
 
         if (certSha256Pin != null && !certSha256Pin.trim().isEmpty()) {
             verifyPin(socket, certSha256Pin.trim());
