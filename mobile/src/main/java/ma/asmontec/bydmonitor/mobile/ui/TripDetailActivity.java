@@ -14,7 +14,7 @@ public final class TripDetailActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        long tripId = getIntent().getLongExtra(TripHistoryActivity.EXTRA_TRIP_ID, -1);
+        long tripId = getIntent().getLongExtra(TripsView.EXTRA_TRIP_ID, -1);
         AppDatabaseHelper db = VehicleStateRepository.getInstance(this).database();
         List<AppDatabaseHelper.TripPointRow> points = db.listTripPoints(tripId);
 

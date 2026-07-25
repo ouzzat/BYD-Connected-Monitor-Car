@@ -12,13 +12,24 @@ import java.util.Locale;
 /** Petits utilitaires partagés pour la palette sombre "premium" de l'application mobile. */
 public final class UiKit {
 
-    public static final int BACKGROUND = Color.rgb(11, 17, 24);
-    public static final int CARD = Color.rgb(24, 32, 41);
-    public static final int ACCENT = Color.rgb(46, 230, 184);
+    public static final int BACKGROUND = Color.parseColor("#0A0E12");
+    public static final int SURFACE = Color.parseColor("#11161C");
+    public static final int CARD = Color.parseColor("#161C24");
+    public static final int ACCENT = Color.parseColor("#38D9A9");
     public static final int TEXT_PRIMARY = Color.WHITE;
     public static final int TEXT_MUTED = Color.rgb(148, 160, 172);
     public static final int ALERT_RED = Color.rgb(255, 92, 92);
     public static final int ALERT_ORANGE = Color.rgb(255, 167, 38);
+    public static final int DIVIDER = Color.parseColor("#232B35");
+
+    /**
+     * Approximation de la police "Inter" demandée par la maquette : aucun
+     * fichier de police n'est fourni ni téléchargé dans ce projet (pas de
+     * licence embarquée), donc la police système la plus proche est
+     * utilisée à la place.
+     */
+    public static final String FONT_FAMILY = "sans-serif";
+    public static final String FONT_FAMILY_MEDIUM = "sans-serif-medium";
 
     private UiKit() {
     }
@@ -112,6 +123,33 @@ public final class UiKit {
             return "—";
         }
         return new java.text.SimpleDateFormat("dd/MM HH:mm:ss", Locale.FRANCE).format(new java.util.Date(millis));
+    }
+
+    /** Bouton visuellement présent mais désactivé par défaut (aucune API officielle branchée). */
+    public static android.widget.Button disabledButton(Context context, String label) {
+        android.widget.Button button = new android.widget.Button(context);
+        button.setText(label);
+        button.setEnabled(false);
+        button.setAlpha(0.45f);
+        return button;
+    }
+
+    /** Étiquette d'onglet simple (Position/Confort, Journal/Alertes…) sans dépendance TabLayout. */
+    public static TextView tabLabel(Context context, String text, boolean selected) {
+        TextView view = new TextView(context);
+        view.setText(text);
+        view.setTextSize(14f);
+        view.setGravity(Gravity.CENTER);
+        view.setPadding(0, dp(context, 10), 0, dp(context, 10));
+        view.setTextColor(selected ? BACKGROUND : TEXT_MUTED);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(context, 10));
+        bg.setColor(selected ? ACCENT : SURFACE);
+        view.setBackground(bg);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        params.setMargins(dp(context, 4), 0, dp(context, 4), dp(context, 12));
+        view.setLayoutParams(params);
+        return view;
     }
 
     public static int dp(Context context, int value) {

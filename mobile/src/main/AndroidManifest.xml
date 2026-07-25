@@ -28,11 +28,7 @@
         </activity>
 
         <activity android:name=".ui.SettingsActivity" android:exported="false" />
-        <activity android:name=".ui.NotificationsActivity" android:exported="false" />
-        <activity android:name=".ui.TripHistoryActivity" android:exported="false" />
         <activity android:name=".ui.TripDetailActivity" android:exported="false" />
-        <activity android:name=".ui.EventsActivity" android:exported="false" />
-        <activity android:name=".ui.RemoteCommandsActivity" android:exported="false" />
         <activity android:name=".ui.AboutActivity" android:exported="false" />
 
         <service

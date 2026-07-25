@@ -121,7 +121,7 @@ sur le véhicule — ce n'est pas encore le cas dans cette version.
    préfixe pour l'application mobile.
 2. Renseignez le compte voiture dans **Car Agent → Configuration
    développeur** (créez d'abord un code local, 6 à 10 chiffres).
-3. Renseignez le compte mobile dans **Monitor Mobile → Plus →
+3. Renseignez le compte mobile dans **Monitor Mobile → menu latéral →
    Paramètres de connexion**, en saisie manuelle ou via un code
    d'activation (JSON `{"u":"...","p":"..."}` encodé en base64). La
    lecture par QR code n'est pas implémentée dans cette version (aucune
@@ -173,20 +173,32 @@ l'archive et publie l'empreinte SHA-256 en artefact.
 - Démarrage automatique après redémarrage (`BOOT_COMPLETED`)
 - Abonnement mobile, reconstruction d'état, historique de trajets
   (SQLite), journal d'événements, notifications configurables
-- Interface : Accueil / État / Carte (hors ligne) / Caméras (en attente)
-  / Plus, avec valeurs `—` pour tout champ non reçu
+- Interface à menu latéral (palette anthracite / vert néon `#38D9A9`) :
+  Tableau de bord (GPS temps réel, vitesse, batterie, puissance, jauges
+  détaillées, commandes rapides), Trajets (historique + détail d'un
+  trajet avec graphiques), Caméra directe, Sièges, Journal — avec
+  valeurs `—` pour tout champ non reçu. La police "Inter" demandée par
+  la maquette n'est pas embarquée (aucun fichier de police fourni ni
+  téléchargé) : la police système la plus proche (`sans-serif`) est
+  utilisée à la place.
 
 **Préparées mais non disponibles (honnêtement affichées comme telles) :**
 
 - Données BYD/DiLink réelles (SOC, autonomie, puissance, couple,
-  température batterie, portes, climatisation) — nécessitent une API
-  constructeur officielle non intégrée ici
-- Flux caméra (les 6 écrans affichent "Module caméra en attente d'une
-  interface véhicule autorisée")
-- Commandes distantes (boutons visibles, désactivés par défaut, aucun
-  envoi possible sans API officielle + authentification forte)
+  température batterie, portes, climatisation, régime moteur, tension
+  haute tension) — nécessitent une API constructeur officielle non
+  intégrée ici
+- Flux caméra et radar de proximité (l'écran Caméra directe affiche
+  "Module caméra en attente d'une interface véhicule autorisée" pour
+  les six angles, et un radar décoratif statique marqué "hors service" —
+  aucune vidéo ni donnée radar simulée)
+- Commandes distantes et sièges (verrouillage, coffre, klaxon,
+  climatisation, mémoires de position, chauffage/ventilation des
+  sièges) : boutons et interrupteurs visibles mais désactivés par
+  défaut, aucun envoi possible sans API officielle + authentification
+  forte
 - Carte en ligne (Google Maps/Mapbox/OSM) — aucune clé fournie, repli
-  sur l'affichage des coordonnées
+  sur l'affichage des coordonnées dans le Tableau de bord
 - Scan QR code pour l'activation mobile
 - Compilation, signature et installation réelles sur un appareil/
   véhicule (nécessite le SDK Android, un keystore de signature et un
