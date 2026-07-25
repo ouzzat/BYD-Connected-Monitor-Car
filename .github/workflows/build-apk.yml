@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APKs
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -36,22 +36,37 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
-      - name: Lint and build APK
-        run: gradle --no-daemon clean lintDebug assembleDebug
+      - name: Unit tests
+        run: gradle --no-daemon test
 
-      - name: Verify APK
+      - name: Lint and build APKs (Car Agent + Mobile)
+        run: gradle --no-daemon clean lintDebug :app:assembleDebug :mobile:assembleDebug
+
+      - name: Verify APKs
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
-          unzip -t "$APK"
-          sha256sum "$APK" | tee app/build/outputs/apk/debug/app-debug.apk.sha256
+          for module in app mobile; do
+            APK="$module/build/outputs/apk/debug/$module-debug.apk"
+            test -f "$APK"
+            unzip -t "$APK"
+            sha256sum "$APK" | tee "$module/build/outputs/apk/debug/$module-debug.apk.sha256"
+          done
 
-      - name: Upload APK
+      - name: Upload Car Agent APK
         uses: actions/upload-artifact@v4
         with:
-          name: BYD-Connected-Monitor-Car-debug
+          name: BYD-Connected-Monitor-CarAgent-debug
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256
             app/build/reports/lint-results-debug.html
+          if-no-files-found: error
+
+      - name: Upload Mobile APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BYD-Monitor-Mobile-debug
+          path: |
+            mobile/build/outputs/apk/debug/mobile-debug.apk
+            mobile/build/outputs/apk/debug/mobile-debug.apk.sha256
+            mobile/build/reports/lint-results-debug.html
           if-no-files-found: error
