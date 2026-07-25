@@ -42,4 +42,8 @@ android {
 
 dependencies {
     testImplementation 'junit:junit:4.13.2'
+    // Le org.json embarqué dans l'android.jar de test unitaire n'est
+    // qu'un bouchon (NullPointerException à l'exécution) : on fournit
+    // la véritable implémentation pour les tests JVM purs.
+    testImplementation 'org.json:json:20240303'
 }
