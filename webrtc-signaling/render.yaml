@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: byd-webrtc-signal
+    runtime: node
+    plan: free
+    rootDir: webrtc-signaling
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeployTrigger: commit
