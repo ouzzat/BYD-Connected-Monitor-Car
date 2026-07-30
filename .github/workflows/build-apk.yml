@@ -1,9 +1,7 @@
-name: Build Android APK
+name: Build WebRTC Android APKs
 
 on:
   workflow_dispatch:
-  push:
-    branches: ["main"]
   pull_request:
     branches: ["main"]
 
@@ -13,17 +11,24 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Extract WebRTC project
+        run: |
+          base64 -d android-project.zip.b64 > /tmp/byd-webrtc.zip
+          unzip -q /tmp/byd-webrtc.zip
+          test -f byd-connected-monitor/gradlew
 
       - name: Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Android SDK
         uses: android-actions/setup-android@v3
@@ -31,27 +36,34 @@ jobs:
       - name: Install Android SDK 35
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Gradle 8.10.2
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.10.2"
-
-      - name: Lint and build APK
-        run: gradle --no-daemon clean lintDebug assembleDebug
-
-      - name: Verify APK
+      - name: Build WebRTC APKs
+        working-directory: byd-connected-monitor
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
-          unzip -t "$APK"
-          sha256sum "$APK" | tee app/build/outputs/apk/debug/app-debug.apk.sha256
+          chmod +x gradlew
+          ./gradlew \
+            :car-agent:app:assembleDebug \
+            :mobile-app:app:assembleDebug \
+            --no-daemon
 
-      - name: Upload APK
+      - name: Verify and checksum APKs
+        working-directory: byd-connected-monitor
+        run: |
+          CAR_APK="car-agent/app/build/outputs/apk/debug/app-debug.apk"
+          MOBILE_APK="mobile-app/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$CAR_APK"
+          test -f "$MOBILE_APK"
+          unzip -t "$CAR_APK"
+          unzip -t "$MOBILE_APK"
+          sha256sum "$CAR_APK" > car-agent-debug.sha256
+          sha256sum "$MOBILE_APK" > mobile-debug.sha256
+
+      - name: Upload WebRTC APKs
         uses: actions/upload-artifact@v4
         with:
-          name: BYD-Connected-Monitor-Car-debug
+          name: BYD-WebRTC-APKs
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/debug/app-debug.apk.sha256
-            app/build/reports/lint-results-debug.html
+            byd-connected-monitor/car-agent/app/build/outputs/apk/debug/app-debug.apk
+            byd-connected-monitor/mobile-app/app/build/outputs/apk/debug/app-debug.apk
+            byd-connected-monitor/car-agent-debug.sha256
+            byd-connected-monitor/mobile-debug.sha256
           if-no-files-found: error
