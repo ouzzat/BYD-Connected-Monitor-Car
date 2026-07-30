@@ -1,0 +1,37 @@
+name: BYD Mobile APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, agent/android-github-actions ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract project
+        run: |
+          base64 -d android-project.zip.b64 > /tmp/byd.zip
+          unzip -q /tmp/byd.zip
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+      - name: Build mobile APK
+        working-directory: byd-connected-monitor
+        run: |
+          chmod +x gradlew
+          ./gradlew :mobile-app:app:assembleDebug :mobile-app:app:assembleRelease --no-daemon
+      - name: Upload mobile APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: byd-mobile-apks
+          if-no-files-found: error
+          path: |
+            byd-connected-monitor/mobile-app/app/build/outputs/apk/debug/app-debug.apk
+            byd-connected-monitor/mobile-app/app/build/outputs/apk/release/app-release.apk
