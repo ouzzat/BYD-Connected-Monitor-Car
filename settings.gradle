@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "BYDConnectedMonitorCar"
 include(":app")
+include(":mobile")
