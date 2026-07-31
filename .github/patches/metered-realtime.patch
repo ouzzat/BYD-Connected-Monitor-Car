@@ -1,0 +1,894 @@
+diff --git a/BUILD.md b/BUILD.md
+index cfe671a..74cbf04 100644
+--- a/BUILD.md
++++ b/BUILD.md
+@@ -18,9 +18,13 @@ Les APK sont générés dans :
+ 
+ ## Connexion
+ 
+-Les deux applications doivent utiliser la même URL de signalisation `wss://`
+-et le même code de salle. La signalisation sert uniquement à établir la
+-connexion WebRTC. Les médias et la télémétrie transitent par WebRTC.
+-
+-Pour une connexion fiable entre deux réseaux mobiles, configurez un serveur
+-TURN sécurisé et des identifiants temporaires.
++Les deux applications doivent utiliser la même clé publiable Metered
++`pk_live_...` et le même code d'appairage. Elles se connectent automatiquement
++à `wss://rms.metered.ca/v1`, puis utilisent le canal `byd/<code>` pour échanger
++les offres SDP et les candidats ICE. Les médias et la télémétrie transitent
++ensuite par WebRTC.
++
++Dans le tableau de bord Metered, créez une clé publiable autorisée sur le motif
++de canal `byd/*` avec `Subscribe`, `Publish` et `Presence`. Les serveurs STUN/TURN
++et leurs identifiants temporaires sont reçus automatiquement lors de la
++connexion. Ne placez jamais une clé secrète `sk_...` dans l'application.
+diff --git a/car-agent/app/src/main/java/com/asmontec/bydavm/car/receiver/BootReceiver.kt b/car-agent/app/src/main/java/com/asmontec/bydavm/car/receiver/BootReceiver.kt
+index 7da69e2..5217074 100644
+--- a/car-agent/app/src/main/java/com/asmontec/bydavm/car/receiver/BootReceiver.kt
++++ b/car-agent/app/src/main/java/com/asmontec/bydavm/car/receiver/BootReceiver.kt
+@@ -8,7 +8,7 @@ import com.asmontec.bydavm.car.service.WebRtcForegroundService
+ class BootReceiver : BroadcastReceiver() {
+     override fun onReceive(context: Context, intent: Intent) {
+         val configured = context.getSharedPreferences("webrtc", Context.MODE_PRIVATE)
+-            .getString("signal_url", null)?.startsWith("wss://") == true
++            .getString("metered_key", null)?.startsWith("pk_live_") == true
+         if (configured) WebRtcForegroundService.startService(context)
+     }
+ }
+diff --git a/car-agent/app/src/main/java/com/asmontec/bydavm/car/service/WebRtcForegroundService.kt b/car-agent/app/src/main/java/com/asmontec/bydavm/car/service/WebRtcForegroundService.kt
+index b2baf5b..806a5bd 100644
+--- a/car-agent/app/src/main/java/com/asmontec/bydavm/car/service/WebRtcForegroundService.kt
++++ b/car-agent/app/src/main/java/com/asmontec/bydavm/car/service/WebRtcForegroundService.kt
+@@ -12,6 +12,7 @@ import com.asmontec.bydavm.car.BydCarApplication
+ import com.asmontec.bydavm.car.collector.GpsCollector
+ import com.asmontec.bydavm.car.hardware.BYDHardwareHelper
+ import com.asmontec.bydavm.car.ui.MainActivity
++import com.asmontec.bydavm.car.webrtc.MeteredIceServer
+ import com.asmontec.bydavm.car.webrtc.SignalClient
+ import com.asmontec.bydavm.car.webrtc.WebRtcCarPeer
+ import com.google.gson.Gson
+@@ -58,18 +59,14 @@ class WebRtcForegroundService : LifecycleService(), SignalClient.Listener {
+         startForeground(NOTIFICATION_ID, notification("En attente du téléphone"))
+         gps.start()
+         val prefs = getSharedPreferences("webrtc", MODE_PRIVATE)
+-        val url = prefs.getString("signal_url", "wss://example.invalid/ws")!!
++        val meteredKey = prefs.getString("metered_key", "")!!
+         val room = prefs.getString("room", "seal-u")!!
+-        val turnUrl = prefs.getString("turn_url", "")!!
+-        val turnUsername = prefs.getString("turn_username", "")!!
+-        val turnPassword = prefs.getString("turn_password", "")!!
+-        signal = SignalClient(url, room, "car", this).also { client ->
+-            peer = WebRtcCarPeer(
+-                this, client, turnUrl, turnUsername, turnPassword,
+-                ::handleData, ::updateStatus
+-            ).also { it.start() }
+-            client.connect()
++        if (!meteredKey.startsWith("pk_live_")) {
++            updateStatus("Configuration Metered requise")
++            stopSelf()
++            return START_NOT_STICKY
+         }
++        signal = SignalClient(meteredKey, room, "car", this).also(SignalClient::connect)
+         telemetryJob = lifecycleScope.launch(Dispatchers.IO) {
+             while (isActive) {
+                 publishTelemetry()
+@@ -79,7 +76,15 @@ class WebRtcForegroundService : LifecycleService(), SignalClient.Listener {
+         return START_STICKY
+     }
+ 
+-    override fun onOpen() = updateStatus("Signalisation connectée")
++    override fun onOpen(iceServers: List<MeteredIceServer>) {
++        if (peer == null) {
++            val client = signal ?: return
++            peer = WebRtcCarPeer(
++                this, client, ::handleData, ::updateStatus
++            ).also { it.start(iceServers) }
++        }
++        updateStatus("Metered connecté — TURN automatique")
++    }
+     override fun onMessage(message: org.json.JSONObject) = peer?.handleSignal(message) ?: Unit
+     override fun onClosed(reason: String) = updateStatus("Hors ligne : $reason")
+ 
+diff --git a/car-agent/app/src/main/java/com/asmontec/bydavm/car/ui/MainActivity.kt b/car-agent/app/src/main/java/com/asmontec/bydavm/car/ui/MainActivity.kt
+index 6d19c62..0589f9d 100644
+--- a/car-agent/app/src/main/java/com/asmontec/bydavm/car/ui/MainActivity.kt
++++ b/car-agent/app/src/main/java/com/asmontec/bydavm/car/ui/MainActivity.kt
+@@ -21,7 +21,12 @@ class MainActivity : AppCompatActivity() {
+         setContentView(binding.root)
+         battery = BatteryCollector(this)
+         val prefs = getSharedPreferences("webrtc", MODE_PRIVATE)
+-        binding.tvSignalUrl.text = "Signalisation : ${prefs.getString("signal_url", "non configurée")}"
++        val configured = prefs.getString("metered_key", "")?.startsWith("pk_live_") == true
++        binding.tvSignalProvider.text = if (configured) {
++            "Signalisation : Metered Realtime — TURN automatique"
++        } else {
++            "Signalisation : Metered non configuré"
++        }
+         binding.tvRoom.text = "Appairage : ${prefs.getString("room", "—")}"
+         binding.btnStart.setOnClickListener {
+             WebRtcForegroundService.startService(this)
+diff --git a/car-agent/app/src/main/java/com/asmontec/bydavm/car/ui/SetupActivity.kt b/car-agent/app/src/main/java/com/asmontec/bydavm/car/ui/SetupActivity.kt
+index a9576de..45eee16 100644
+--- a/car-agent/app/src/main/java/com/asmontec/bydavm/car/ui/SetupActivity.kt
++++ b/car-agent/app/src/main/java/com/asmontec/bydavm/car/ui/SetupActivity.kt
+@@ -14,34 +14,22 @@ class SetupActivity : AppCompatActivity() {
+         binding = ActivitySetupBinding.inflate(layoutInflater)
+         setContentView(binding.root)
+         val prefs = getSharedPreferences("webrtc", MODE_PRIVATE)
+-        binding.etSignalUrl.setText(prefs.getString("signal_url", ""))
++        binding.etMeteredKey.setText(prefs.getString("metered_key", ""))
+         binding.etRoom.setText(prefs.getString("room", "seal-u"))
+-        binding.etTurnUrl.setText(prefs.getString("turn_url", ""))
+-        binding.etTurnUsername.setText(prefs.getString("turn_username", ""))
+-        binding.etTurnPassword.setText(prefs.getString("turn_password", ""))
+         binding.btnSave.setOnClickListener {
+-            val url = binding.etSignalUrl.text.toString().trim()
++            val meteredKey = binding.etMeteredKey.text.toString().trim()
+             val room = binding.etRoom.text.toString().trim()
+-            val turnUrl = binding.etTurnUrl.text.toString().trim()
+-            val turnUsername = binding.etTurnUsername.text.toString().trim()
+-            val turnPassword = binding.etTurnPassword.text.toString()
+-            if (!url.startsWith("wss://") || room.length < 4 ||
+-                !(turnUrl.startsWith("turn:") || turnUrl.startsWith("turns:")) ||
+-                turnUsername.isBlank() || turnPassword.isBlank()
+-            ) {
++            if (!meteredKey.startsWith("pk_live_") || room.length !in 4..64) {
+                 Toast.makeText(
+                     this,
+-                    "WSS, code d’appairage et paramètres TURN complets requis",
++                    "Clé Metered pk_live_… et code d’appairage de 4 à 64 caractères requis",
+                     Toast.LENGTH_LONG
+                 ).show()
+                 return@setOnClickListener
+             }
+             prefs.edit()
+-                .putString("signal_url", url)
++                .putString("metered_key", meteredKey)
+                 .putString("room", room)
+-                .putString("turn_url", turnUrl)
+-                .putString("turn_username", turnUsername)
+-                .putString("turn_password", turnPassword)
+                 .apply()
+             startActivity(Intent(this, MainActivity::class.java))
+             finish()
+diff --git a/car-agent/app/src/main/java/com/asmontec/bydavm/car/webrtc/SignalClient.kt b/car-agent/app/src/main/java/com/asmontec/bydavm/car/webrtc/SignalClient.kt
+index 2f9e8b0..1e70927 100644
+--- a/car-agent/app/src/main/java/com/asmontec/bydavm/car/webrtc/SignalClient.kt
++++ b/car-agent/app/src/main/java/com/asmontec/bydavm/car/webrtc/SignalClient.kt
+@@ -5,56 +5,176 @@ import okhttp3.Request
+ import okhttp3.Response
+ import okhttp3.WebSocket
+ import okhttp3.WebSocketListener
++import org.json.JSONArray
+ import org.json.JSONObject
++import java.net.URLEncoder
++import java.util.concurrent.Executors
+ import java.util.concurrent.TimeUnit
++import java.util.concurrent.atomic.AtomicBoolean
++import java.util.concurrent.atomic.AtomicLong
++
++data class MeteredIceServer(
++    val urls: List<String>,
++    val username: String = "",
++    val credential: String = ""
++)
+ 
+ class SignalClient(
+-    private val url: String,
+-    private val room: String,
++    private val publishableKey: String,
++    room: String,
+     private val role: String,
+     private val listener: Listener
+ ) {
+     interface Listener {
+-        fun onOpen()
++        fun onOpen(iceServers: List<MeteredIceServer>)
+         fun onMessage(message: JSONObject)
+         fun onClosed(reason: String)
+     }
+ 
++    companion object {
++        private const val ENDPOINT = "wss://rms.metered.ca/v1"
++    }
++
++    private val channel = "byd/${room.trim()}"
++    private val requestIds = AtomicLong(0)
++    private val reconnectScheduled = AtomicBoolean(false)
++    private val scheduler = Executors.newSingleThreadScheduledExecutor()
+     private val http = OkHttpClient.Builder()
+         .pingInterval(20, TimeUnit.SECONDS)
+         .retryOnConnectionFailure(true)
+         .build()
+-    private var socket: WebSocket? = null
++
++    @Volatile private var socket: WebSocket? = null
++    @Volatile private var active = false
++    @Volatile private var retryDelaySeconds = 2L
++    @Volatile private var meteredIceServers: List<MeteredIceServer> = emptyList()
+ 
+     fun connect() {
+-        socket = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
++        active = true
++        openSocket()
++    }
++
++    private fun openSocket() {
++        if (!active) return
++        reconnectScheduled.set(false)
++        val encodedKey = URLEncoder.encode(publishableKey, "UTF-8")
++        val request = Request.Builder().url("$ENDPOINT?key=$encodedKey").build()
++        socket = http.newWebSocket(request, object : WebSocketListener() {
+             override fun onOpen(webSocket: WebSocket, response: Response) {
+-                send(JSONObject().put("type", "join").put("room", room).put("role", role))
+-                listener.onOpen()
++                retryDelaySeconds = 2L
+             }
+ 
+             override fun onMessage(webSocket: WebSocket, text: String) {
+-                runCatching { JSONObject(text) }.onSuccess(listener::onMessage)
++                runCatching { JSONObject(text) }
++                    .onSuccess(::handleMeteredMessage)
++                    .onFailure { listener.onClosed("Réponse Metered invalide") }
+             }
+ 
+             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+-                listener.onClosed(reason)
++                if (active) {
++                    listener.onClosed(reason.ifBlank { "connexion fermée ($code)" })
++                    scheduleReconnect()
++                }
+             }
+ 
+             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+-                listener.onClosed(t.message ?: "signalisation indisponible")
++                if (active) {
++                    listener.onClosed(t.message ?: "signalisation Metered indisponible")
++                    scheduleReconnect()
++                }
+             }
+         })
+     }
+ 
++    private fun handleMeteredMessage(frame: JSONObject) {
++        when (frame.optString("type")) {
++            "welcome" -> {
++                meteredIceServers = parseIceServers(frame)
++                socket?.send(
++                    JSONObject()
++                        .put("type", "subscribe")
++                        .put("channel", channel)
++                        .put("requestId", "subscribe-${nextRequestId()}")
++                        .toString()
++                )
++            }
++            "ack" -> if (frame.optString("requestId").startsWith("subscribe-")) {
++                listener.onOpen(meteredIceServers)
++            }
++            "message" -> {
++                val data = frame.optJSONObject("data") ?: return
++                if (data.optString("from") != role) listener.onMessage(data)
++            }
++            "presence" -> {
++                val joined = frame.optJSONArray("joined")
++                if (joined != null && joined.length() > 0) {
++                    listener.onMessage(JSONObject().put("type", "peer-joined"))
++                }
++            }
++            "error" -> listener.onClosed(
++                "Metered ${frame.optString("code")}: ${frame.optString("message")}"
++            )
++            "going_away" -> listener.onClosed("Metered redémarre, reconnexion automatique")
++        }
++    }
++
++    private fun parseIceServers(frame: JSONObject): List<MeteredIceServer> {
++        val metadata = frame.optJSONObject("metadata")
++        val array = metadata?.optJSONArray("iceServers")
++            ?: frame.optJSONArray("iceServers")
++            ?: JSONArray()
++        return buildList {
++            for (index in 0 until array.length()) {
++                val item = array.optJSONObject(index) ?: continue
++                val urlsValue = item.opt("urls")
++                val urls = when (urlsValue) {
++                    is JSONArray -> buildList {
++                        for (urlIndex in 0 until urlsValue.length()) {
++                            urlsValue.optString(urlIndex).takeIf(String::isNotBlank)?.let(::add)
++                        }
++                    }
++                    is String -> listOf(urlsValue).filter(String::isNotBlank)
++                    else -> emptyList()
++                }
++                if (urls.isNotEmpty()) {
++                    add(
++                        MeteredIceServer(
++                            urls = urls,
++                            username = item.optString("username"),
++                            credential = item.optString("credential")
++                        )
++                    )
++                }
++            }
++        }
++    }
++
+     fun send(message: JSONObject) {
+-        message.put("room", room).put("from", role)
+-        socket?.send(message.toString())
++        val data = JSONObject(message.toString()).put("from", role)
++        socket?.send(
++            JSONObject()
++                .put("type", "publish")
++                .put("channel", channel)
++                .put("data", data)
++                .put("requestId", "publish-${nextRequestId()}")
++                .toString()
++        )
++    }
++
++    private fun nextRequestId(): Long = requestIds.incrementAndGet()
++
++    private fun scheduleReconnect() {
++        if (!active || !reconnectScheduled.compareAndSet(false, true)) return
++        val delay = retryDelaySeconds
++        retryDelaySeconds = (retryDelaySeconds * 2).coerceAtMost(30L)
++        scheduler.schedule({ openSocket() }, delay, TimeUnit.SECONDS)
+     }
+ 
+     fun close() {
++        active = false
+         socket?.close(1000, "arrêt")
+         socket = null
++        scheduler.shutdownNow()
+         http.dispatcher.executorService.shutdown()
+     }
+ }
+diff --git a/car-agent/app/src/main/java/com/asmontec/bydavm/car/webrtc/WebRtcCarPeer.kt b/car-agent/app/src/main/java/com/asmontec/bydavm/car/webrtc/WebRtcCarPeer.kt
+index 4bc435b..8bfe0cc 100644
+--- a/car-agent/app/src/main/java/com/asmontec/bydavm/car/webrtc/WebRtcCarPeer.kt
++++ b/car-agent/app/src/main/java/com/asmontec/bydavm/car/webrtc/WebRtcCarPeer.kt
+@@ -8,9 +8,6 @@ import java.nio.ByteBuffer
+ class WebRtcCarPeer(
+     private val context: Context,
+     private val signal: SignalClient,
+-    private val turnUrl: String,
+-    private val turnUsername: String,
+-    private val turnPassword: String,
+     private val onData: (String) -> Unit,
+     private val onState: (String) -> Unit
+ ) {
+@@ -32,14 +29,17 @@ class WebRtcCarPeer(
+             .createPeerConnectionFactory()
+     }
+ 
+-    fun start() {
+-        val iceServers = mutableListOf(
+-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+-        )
+-        iceServers += PeerConnection.IceServer.builder(turnUrl)
+-            .setUsername(turnUsername)
+-            .setPassword(turnPassword)
+-            .createIceServer()
++    fun start(meteredServers: List<MeteredIceServer>) {
++        val iceServers = meteredServers.flatMap { server ->
++            server.urls.map { url ->
++                PeerConnection.IceServer.builder(url)
++                    .setUsername(server.username)
++                    .setPassword(server.credential)
++                    .createIceServer()
++            }
++        }.ifEmpty {
++            listOf(PeerConnection.IceServer.builder("stun:stun.relay.metered.ca:80").createIceServer())
++        }
+         val config = PeerConnection.RTCConfiguration(
+             iceServers
+         ).apply {
+@@ -73,6 +73,7 @@ class WebRtcCarPeer(
+     }
+ 
+     fun createOffer() {
++        if (peer?.signalingState() != PeerConnection.SignalingState.STABLE) return
+         peer?.createOffer(object : SdpAdapter() {
+             override fun onCreateSuccess(sdp: SessionDescription) {
+                 peer?.setLocalDescription(SdpAdapter(), sdp)
+diff --git a/car-agent/app/src/main/res/layout/activity_main.xml b/car-agent/app/src/main/res/layout/activity_main.xml
+index 6d30bcf..6da11be 100644
+--- a/car-agent/app/src/main/res/layout/activity_main.xml
++++ b/car-agent/app/src/main/res/layout/activity_main.xml
+@@ -9,13 +9,13 @@
+     <TextView
+         android:layout_width="wrap_content"
+         android:layout_height="wrap_content"
+-        android:text="BYD Car Agent — WebRTC"
++        android:text="BYD Car Agent — WebRTC Metered"
+         android:textColor="#FFFFFF"
+         android:textSize="22sp"
+         android:textStyle="bold" />
+ 
+     <TextView
+-        android:id="@+id/tvSignalUrl"
++        android:id="@+id/tvSignalProvider"
+         android:layout_width="wrap_content"
+         android:layout_height="wrap_content"
+         android:layout_marginTop="18dp"
+diff --git a/car-agent/app/src/main/res/layout/activity_setup.xml b/car-agent/app/src/main/res/layout/activity_setup.xml
+index 5a60505..0583b93 100644
+--- a/car-agent/app/src/main/res/layout/activity_setup.xml
++++ b/car-agent/app/src/main/res/layout/activity_setup.xml
+@@ -12,55 +12,38 @@
+     <TextView
+         android:layout_width="wrap_content"
+         android:layout_height="wrap_content"
+-        android:text="Configuration WebRTC"
++        android:text="Configuration WebRTC — Metered"
+         android:textSize="22sp"
+         android:textStyle="bold" />
+ 
+-    <EditText
+-        android:id="@+id/etSignalUrl"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="24dp"
+-        android:hint="wss://votre-serveur/ws"
+-        android:inputType="textUri" />
+-
+-    <EditText
+-        android:id="@+id/etRoom"
++    <TextView
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+-        android:layout_marginTop="12dp"
+-        android:hint="Code d’appairage"
+-        android:inputType="text" />
++        android:layout_marginTop="8dp"
++        android:text="Signalisation WSS et TURN automatiques. Utilisez la même clé publiable et le même code dans les deux applications."
++        android:textSize="14sp" />
+ 
+     <EditText
+-        android:id="@+id/etTurnUrl"
++        android:id="@+id/etMeteredKey"
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+-        android:layout_marginTop="12dp"
+-        android:hint="turn:votre-serveur:3478"
+-        android:inputType="textUri" />
++        android:layout_marginTop="24dp"
++        android:hint="Clé publiable Metered (pk_live_…)"
++        android:inputType="textPassword" />
+ 
+     <EditText
+-        android:id="@+id/etTurnUsername"
++        android:id="@+id/etRoom"
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+         android:layout_marginTop="12dp"
+-        android:hint="Utilisateur TURN"
++        android:hint="Code d’appairage"
+         android:inputType="text" />
+ 
+-    <EditText
+-        android:id="@+id/etTurnPassword"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="12dp"
+-        android:hint="Mot de passe TURN"
+-        android:inputType="textPassword" />
+-
+     <Button
+         android:id="@+id/btnSave"
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+         android:layout_marginTop="20dp"
+-        android:text="Enregistrer et démarrer" />
++        android:text="Enregistrer et connecter à Metered" />
+ </LinearLayout>
+ </ScrollView>
+diff --git a/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/ui/MainActivity.kt b/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/ui/MainActivity.kt
+index be8494b..aeefa17 100644
+--- a/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/ui/MainActivity.kt
++++ b/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/ui/MainActivity.kt
+@@ -4,6 +4,7 @@ import android.os.Bundle
+ import android.widget.Toast
+ import androidx.appcompat.app.AppCompatActivity
+ import com.asmontec.bydavm.mobile.databinding.ActivityMainBinding
++import com.asmontec.bydavm.mobile.webrtc.MeteredIceServer
+ import com.asmontec.bydavm.mobile.webrtc.SignalClient
+ import com.asmontec.bydavm.mobile.webrtc.WebRtcMobilePeer
+ import org.json.JSONObject
+@@ -18,57 +19,51 @@ class MainActivity : AppCompatActivity(), SignalClient.Listener {
+         binding = ActivityMainBinding.inflate(layoutInflater)
+         setContentView(binding.root)
+         val prefs = getSharedPreferences("webrtc", MODE_PRIVATE)
+-        binding.etSignalUrl.setText(prefs.getString("signal_url", ""))
++        binding.etMeteredKey.setText(prefs.getString("metered_key", ""))
+         binding.etRoom.setText(prefs.getString("room", "seal-u"))
+-        binding.etTurnUrl.setText(prefs.getString("turn_url", ""))
+-        binding.etTurnUsername.setText(prefs.getString("turn_username", ""))
+-        binding.etTurnPassword.setText(prefs.getString("turn_password", ""))
+         binding.btnConnect.setOnClickListener { connect() }
+     }
+ 
+     private fun connect() {
+-        val url = binding.etSignalUrl.text.toString().trim()
++        val meteredKey = binding.etMeteredKey.text.toString().trim()
+         val room = binding.etRoom.text.toString().trim()
+-        val turnUrl = binding.etTurnUrl.text.toString().trim()
+-        val turnUsername = binding.etTurnUsername.text.toString().trim()
+-        val turnPassword = binding.etTurnPassword.text.toString()
+-        if (!url.startsWith("wss://") || room.length < 4 ||
+-            !(turnUrl.startsWith("turn:") || turnUrl.startsWith("turns:")) ||
+-            turnUsername.isBlank() || turnPassword.isBlank()
+-        ) {
++        if (!meteredKey.startsWith("pk_live_") || room.length !in 4..64) {
+             Toast.makeText(
+                 this,
+-                "WSS, code d’appairage et paramètres TURN complets requis",
++                "Clé Metered pk_live_… et code d’appairage de 4 à 64 caractères requis",
+                 Toast.LENGTH_LONG
+             ).show()
+             return
+         }
+         getSharedPreferences("webrtc", MODE_PRIVATE).edit()
+-            .putString("signal_url", url)
++            .putString("metered_key", meteredKey)
+             .putString("room", room)
+-            .putString("turn_url", turnUrl)
+-            .putString("turn_username", turnUsername)
+-            .putString("turn_password", turnPassword)
+             .apply()
++        peer?.close()
++        signal?.close()
++        peer = null
+         binding.tvStatus.text = "Connexion…"
+-        signal = SignalClient(url, room, this).also { client ->
++        signal = SignalClient(meteredKey, room, "mobile", this).also(SignalClient::connect)
++    }
++
++    override fun onOpen(iceServers: List<MeteredIceServer>) {
++        if (peer == null) {
++            val client = signal ?: return
+             peer = WebRtcMobilePeer(
+                 this, binding.remoteVideo, client,
+-                turnUrl, turnUsername, turnPassword,
+                 { data -> runOnUiThread { binding.tvTelemetry.text = data } },
+                 { state -> runOnUiThread { binding.tvStatus.text = state } }
+-            ).also { it.start() }
+-            client.connect()
++            ).also { it.start(iceServers) }
+         }
+-    }
+-
+-    override fun onOpen() {
+-        runOnUiThread { binding.tvStatus.text = "Signalisation connectée" }
+-        signal?.send(JSONObject().put("type", "ready"))
++        runOnUiThread { binding.tvStatus.text = "Metered connecté — TURN automatique" }
+     }
+ 
+     override fun onMessage(message: JSONObject) {
+-        peer?.handleSignal(message)
++        if (message.optString("type") == "peer-joined") {
++            signal?.send(JSONObject().put("type", "ready"))
++        } else {
++            peer?.handleSignal(message)
++        }
+     }
+ 
+     override fun onClosed(reason: String) {
+diff --git a/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/webrtc/SignalClient.kt b/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/webrtc/SignalClient.kt
+index 40dfb78..6e3b520 100644
+--- a/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/webrtc/SignalClient.kt
++++ b/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/webrtc/SignalClient.kt
+@@ -5,45 +5,176 @@ import okhttp3.Request
+ import okhttp3.Response
+ import okhttp3.WebSocket
+ import okhttp3.WebSocketListener
++import org.json.JSONArray
+ import org.json.JSONObject
++import java.net.URLEncoder
++import java.util.concurrent.Executors
+ import java.util.concurrent.TimeUnit
++import java.util.concurrent.atomic.AtomicBoolean
++import java.util.concurrent.atomic.AtomicLong
++
++data class MeteredIceServer(
++    val urls: List<String>,
++    val username: String = "",
++    val credential: String = ""
++)
+ 
+ class SignalClient(
+-    private val url: String,
+-    private val room: String,
++    private val publishableKey: String,
++    room: String,
++    private val role: String,
+     private val listener: Listener
+ ) {
+     interface Listener {
+-        fun onOpen()
++        fun onOpen(iceServers: List<MeteredIceServer>)
+         fun onMessage(message: JSONObject)
+         fun onClosed(reason: String)
+     }
+ 
+-    private val http = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
+-    private var socket: WebSocket? = null
++    companion object {
++        private const val ENDPOINT = "wss://rms.metered.ca/v1"
++    }
++
++    private val channel = "byd/${room.trim()}"
++    private val requestIds = AtomicLong(0)
++    private val reconnectScheduled = AtomicBoolean(false)
++    private val scheduler = Executors.newSingleThreadScheduledExecutor()
++    private val http = OkHttpClient.Builder()
++        .pingInterval(20, TimeUnit.SECONDS)
++        .retryOnConnectionFailure(true)
++        .build()
++
++    @Volatile private var socket: WebSocket? = null
++    @Volatile private var active = false
++    @Volatile private var retryDelaySeconds = 2L
++    @Volatile private var meteredIceServers: List<MeteredIceServer> = emptyList()
+ 
+     fun connect() {
+-        socket = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
++        active = true
++        openSocket()
++    }
++
++    private fun openSocket() {
++        if (!active) return
++        reconnectScheduled.set(false)
++        val encodedKey = URLEncoder.encode(publishableKey, "UTF-8")
++        val request = Request.Builder().url("$ENDPOINT?key=$encodedKey").build()
++        socket = http.newWebSocket(request, object : WebSocketListener() {
+             override fun onOpen(webSocket: WebSocket, response: Response) {
+-                send(JSONObject().put("type", "join").put("role", "mobile"))
+-                listener.onOpen()
++                retryDelaySeconds = 2L
+             }
++
+             override fun onMessage(webSocket: WebSocket, text: String) {
+-                runCatching { JSONObject(text) }.onSuccess(listener::onMessage)
++                runCatching { JSONObject(text) }
++                    .onSuccess(::handleMeteredMessage)
++                    .onFailure { listener.onClosed("Réponse Metered invalide") }
++            }
++
++            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
++                if (active) {
++                    listener.onClosed(reason.ifBlank { "connexion fermée ($code)" })
++                    scheduleReconnect()
++                }
++            }
++
++            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
++                if (active) {
++                    listener.onClosed(t.message ?: "signalisation Metered indisponible")
++                    scheduleReconnect()
++                }
+             }
+-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) =
+-                listener.onClosed(reason)
+-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) =
+-                listener.onClosed(t.message ?: "signalisation indisponible")
+         })
+     }
+ 
++    private fun handleMeteredMessage(frame: JSONObject) {
++        when (frame.optString("type")) {
++            "welcome" -> {
++                meteredIceServers = parseIceServers(frame)
++                socket?.send(
++                    JSONObject()
++                        .put("type", "subscribe")
++                        .put("channel", channel)
++                        .put("requestId", "subscribe-${nextRequestId()}")
++                        .toString()
++                )
++            }
++            "ack" -> if (frame.optString("requestId").startsWith("subscribe-")) {
++                listener.onOpen(meteredIceServers)
++            }
++            "message" -> {
++                val data = frame.optJSONObject("data") ?: return
++                if (data.optString("from") != role) listener.onMessage(data)
++            }
++            "presence" -> {
++                val joined = frame.optJSONArray("joined")
++                if (joined != null && joined.length() > 0) {
++                    listener.onMessage(JSONObject().put("type", "peer-joined"))
++                }
++            }
++            "error" -> listener.onClosed(
++                "Metered ${frame.optString("code")}: ${frame.optString("message")}"
++            )
++            "going_away" -> listener.onClosed("Metered redémarre, reconnexion automatique")
++        }
++    }
++
++    private fun parseIceServers(frame: JSONObject): List<MeteredIceServer> {
++        val metadata = frame.optJSONObject("metadata")
++        val array = metadata?.optJSONArray("iceServers")
++            ?: frame.optJSONArray("iceServers")
++            ?: JSONArray()
++        return buildList {
++            for (index in 0 until array.length()) {
++                val item = array.optJSONObject(index) ?: continue
++                val urlsValue = item.opt("urls")
++                val urls = when (urlsValue) {
++                    is JSONArray -> buildList {
++                        for (urlIndex in 0 until urlsValue.length()) {
++                            urlsValue.optString(urlIndex).takeIf(String::isNotBlank)?.let(::add)
++                        }
++                    }
++                    is String -> listOf(urlsValue).filter(String::isNotBlank)
++                    else -> emptyList()
++                }
++                if (urls.isNotEmpty()) {
++                    add(
++                        MeteredIceServer(
++                            urls = urls,
++                            username = item.optString("username"),
++                            credential = item.optString("credential")
++                        )
++                    )
++                }
++            }
++        }
++    }
++
+     fun send(message: JSONObject) {
+-        socket?.send(message.put("room", room).put("from", "mobile").toString())
++        val data = JSONObject(message.toString()).put("from", role)
++        socket?.send(
++            JSONObject()
++                .put("type", "publish")
++                .put("channel", channel)
++                .put("data", data)
++                .put("requestId", "publish-${nextRequestId()}")
++                .toString()
++        )
++    }
++
++    private fun nextRequestId(): Long = requestIds.incrementAndGet()
++
++    private fun scheduleReconnect() {
++        if (!active || !reconnectScheduled.compareAndSet(false, true)) return
++        val delay = retryDelaySeconds
++        retryDelaySeconds = (retryDelaySeconds * 2).coerceAtMost(30L)
++        scheduler.schedule({ openSocket() }, delay, TimeUnit.SECONDS)
+     }
+ 
+     fun close() {
++        active = false
+         socket?.close(1000, "arrêt")
++        socket = null
++        scheduler.shutdownNow()
+         http.dispatcher.executorService.shutdown()
+     }
+ }
+diff --git a/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/webrtc/WebRtcMobilePeer.kt b/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/webrtc/WebRtcMobilePeer.kt
+index 58783e7..0abbde0 100644
+--- a/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/webrtc/WebRtcMobilePeer.kt
++++ b/mobile-app/app/src/main/java/com/asmontec/bydavm/mobile/webrtc/WebRtcMobilePeer.kt
+@@ -9,9 +9,6 @@ class WebRtcMobilePeer(
+     context: Context,
+     private val renderer: SurfaceViewRenderer,
+     private val signal: SignalClient,
+-    private val turnUrl: String,
+-    private val turnUsername: String,
+-    private val turnPassword: String,
+     private val onData: (String) -> Unit,
+     private val onState: (String) -> Unit
+ ) {
+@@ -32,14 +29,17 @@ class WebRtcMobilePeer(
+             .createPeerConnectionFactory()
+     }
+ 
+-    fun start() {
+-        val iceServers = mutableListOf(
+-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+-        )
+-        iceServers += PeerConnection.IceServer.builder(turnUrl)
+-            .setUsername(turnUsername)
+-            .setPassword(turnPassword)
+-            .createIceServer()
++    fun start(meteredServers: List<MeteredIceServer>) {
++        val iceServers = meteredServers.flatMap { server ->
++            server.urls.map { url ->
++                PeerConnection.IceServer.builder(url)
++                    .setUsername(server.username)
++                    .setPassword(server.credential)
++                    .createIceServer()
++            }
++        }.ifEmpty {
++            listOf(PeerConnection.IceServer.builder("stun:stun.relay.metered.ca:80").createIceServer())
++        }
+         val config = PeerConnection.RTCConfiguration(
+             iceServers
+         ).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
+diff --git a/mobile-app/app/src/main/res/layout/activity_main.xml b/mobile-app/app/src/main/res/layout/activity_main.xml
+index 19e944b..57cb6ad 100644
+--- a/mobile-app/app/src/main/res/layout/activity_main.xml
++++ b/mobile-app/app/src/main/res/layout/activity_main.xml
+@@ -13,64 +13,45 @@
+         <TextView
+             android:layout_width="wrap_content"
+             android:layout_height="wrap_content"
+-            android:text="BYD Seal U — WebRTC"
++            android:text="BYD Seal U — WebRTC Metered"
+             android:textColor="#FFFFFF"
+             android:textSize="22sp"
+             android:textStyle="bold" />
+ 
+-        <EditText
+-            android:id="@+id/etSignalUrl"
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="14dp"
+-            android:hint="wss://votre-serveur/ws"
+-            android:inputType="textUri"
+-            android:textColor="#FFFFFF"
+-            android:textColorHint="#888888" />
+-
+-        <EditText
+-            android:id="@+id/etRoom"
++        <TextView
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:hint="Code d’appairage"
+-            android:inputType="text"
+-            android:textColor="#FFFFFF"
+-            android:textColorHint="#888888" />
++            android:layout_marginTop="6dp"
++            android:text="WSS et TURN automatiques — aucun serveur Render requis"
++            android:textColor="#CFCFCF"
++            android:textSize="13sp" />
+ 
+         <EditText
+-            android:id="@+id/etTurnUrl"
++            android:id="@+id/etMeteredKey"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:hint="turn:votre-serveur:3478"
+-            android:inputType="textUri"
++            android:layout_marginTop="14dp"
++            android:hint="Clé publiable Metered (pk_live_…)"
++            android:inputType="textPassword"
+             android:textColor="#FFFFFF"
+             android:textColorHint="#888888" />
+ 
+         <EditText
+-            android:id="@+id/etTurnUsername"
++            android:id="@+id/etRoom"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:hint="Utilisateur TURN"
++            android:hint="Code d’appairage"
+             android:inputType="text"
+             android:textColor="#FFFFFF"
+             android:textColorHint="#888888" />
+ 
+-        <EditText
+-            android:id="@+id/etTurnPassword"
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:hint="Mot de passe TURN"
+-            android:inputType="textPassword"
+-            android:textColor="#FFFFFF"
+-            android:textColorHint="#888888" />
+-
+         <Button
+             android:id="@+id/btnConnect"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+             android:layout_marginTop="10dp"
+             android:backgroundTint="#38D9A9"
+-            android:text="Connexion WebRTC"
++            android:text="Connexion WebRTC Metered"
+             android:textColor="#111111" />
+ 
+         <TextView
