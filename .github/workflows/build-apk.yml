@@ -23,6 +23,11 @@ jobs:
           unzip -q /tmp/byd-webrtc.zip
           test -f byd-connected-monitor/gradlew
 
+      - name: Apply Metered Realtime integration
+        run: |
+          git -C byd-connected-monitor apply --check ../.github/patches/metered-realtime.patch
+          git -C byd-connected-monitor apply ../.github/patches/metered-realtime.patch
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
@@ -36,7 +41,7 @@ jobs:
       - name: Install Android SDK 35
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build WebRTC APKs
+      - name: Build Metered WebRTC APKs
         working-directory: byd-connected-monitor
         run: |
           chmod +x gradlew
@@ -45,7 +50,7 @@ jobs:
             :mobile-app:app:assembleDebug \
             --no-daemon
 
-      - name: Verify and checksum APKs
+      - name: Verify, rename and checksum APKs
         working-directory: byd-connected-monitor
         run: |
           CAR_APK="car-agent/app/build/outputs/apk/debug/app-debug.apk"
@@ -54,16 +59,14 @@ jobs:
           test -f "$MOBILE_APK"
           unzip -t "$CAR_APK"
           unzip -t "$MOBILE_APK"
-          sha256sum "$CAR_APK" > car-agent-debug.sha256
-          sha256sum "$MOBILE_APK" > mobile-debug.sha256
+          mkdir -p dist
+          cp "$CAR_APK" dist/BYD-Car-WebRTC-Metered-debug.apk
+          cp "$MOBILE_APK" dist/BYD-Mobile-WebRTC-Metered-debug.apk
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
 
-      - name: Upload WebRTC APKs
+      - name: Upload Metered WebRTC APKs
         uses: actions/upload-artifact@v4
         with:
-          name: BYD-WebRTC-APKs
-          path: |
-            byd-connected-monitor/car-agent/app/build/outputs/apk/debug/app-debug.apk
-            byd-connected-monitor/mobile-app/app/build/outputs/apk/debug/app-debug.apk
-            byd-connected-monitor/car-agent-debug.sha256
-            byd-connected-monitor/mobile-debug.sha256
+          name: BYD-WebRTC-Metered-APKs
+          path: byd-connected-monitor/dist/*
           if-no-files-found: error
