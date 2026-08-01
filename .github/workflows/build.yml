@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ agent/auto-dashboard-compile ]
+  pull_request:
+    branches: [ main ]
 
 permissions:
   contents: read
