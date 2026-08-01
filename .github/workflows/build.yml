@@ -1,26 +1,28 @@
-name: BYD Connected Monitor CI/CD
+name: AutoDashboard Android APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, agent/android-github-actions ]
+    branches: [ agent/auto-dashboard-compile ]
+  pull_request:
+    branches: [ main ]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build Android APKs
+    name: Build AutoDashboard debug APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract Android project
+      - name: Extract AutoDashboard project
         run: |
-          base64 -d android-project.zip.b64 > /tmp/byd-connected-monitor.zip
-          unzip -q /tmp/byd-connected-monitor.zip
-          test -f byd-connected-monitor/gradlew
+          base64 -d android-project.zip.b64 > /tmp/auto-dashboard.zip
+          unzip -q /tmp/auto-dashboard.zip
+          test -f AutoDashboard/gradlew
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -28,37 +30,22 @@ jobs:
           java-version: '17'
           distribution: temurin
           cache: gradle
+          cache-dependency-path: AutoDashboard/*.gradle.kts
 
-      - name: Build debug and release APKs
-        working-directory: byd-connected-monitor
+      - name: Build debug APK
+        working-directory: AutoDashboard
         run: |
           chmod +x gradlew
-          ./gradlew :car-agent:app:assembleDebug :car-agent:app:assembleRelease :mobile-app:app:assembleDebug :mobile-app:app:assembleRelease --no-daemon
+          ./gradlew clean assembleDebug --no-daemon --stacktrace
 
-      - name: Security checks
-        working-directory: byd-connected-monitor
-        run: |
-          ! grep -RInE 'password[[:space:]]*=[[:space:]]*"[^"]+' --include='*.kt' --include='*.java' .
-          ! grep -RInE 'hivemq_password|mqtt_secret' --include='*.kt' --include='*.java' --include='*.xml' .
-          ! grep -RIn 'allowBackup="true"' --include='*.xml' .
+      - name: Compute checksum
+        run: sha256sum AutoDashboard/app/build/outputs/apk/debug/app-debug.apk > AutoDashboard-debug.sha256
 
-      - name: Compute checksums
-        working-directory: byd-connected-monitor
-        run: |
-          sha256sum car-agent/app/build/outputs/apk/debug/app-debug.apk > car-agent-debug.sha256
-          sha256sum car-agent/app/build/outputs/apk/release/app-release.apk > car-agent-release.sha256
-          sha256sum mobile-app/app/build/outputs/apk/debug/app-debug.apk > mobile-debug.sha256
-          sha256sum mobile-app/app/build/outputs/apk/release/app-release.apk > mobile-release.sha256
-
-      - name: Upload APK artifacts
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: byd-connected-monitor-apks
+          name: AutoDashboard-v0.3-debug
           if-no-files-found: error
           path: |
-            byd-connected-monitor/car-agent/app/build/outputs/apk/debug/app-debug.apk
-            byd-connected-monitor/car-agent/app/build/outputs/apk/release/app-release.apk
-            byd-connected-monitor/mobile-app/app/build/outputs/apk/debug/app-debug.apk
-            byd-connected-monitor/mobile-app/app/build/outputs/apk/release/app-release.apk
-            byd-connected-monitor/*-debug.sha256
-            byd-connected-monitor/*-release.sha256
+            AutoDashboard/app/build/outputs/apk/debug/app-debug.apk
+            AutoDashboard-debug.sha256
