@@ -3,7 +3,7 @@ name: BYD Connected Monitor CI/CD
 on:
   workflow_dispatch:
   push:
-    branches: [ main, agent/android-github-actions ]
+    branches: [ main, agent/android-github-actions, feature/webrtc-signaling-server ]
 
 permissions:
   contents: read
