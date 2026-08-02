@@ -1,0 +1,46 @@
+name: Publish public Seal U APKs
+
+on:
+  push:
+    branches: [feature/webrtc-signaling-server]
+    paths: [.github/workflows/publish-apks.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract Android project
+        run: |
+          base64 -d android-project.zip.b64 > /tmp/byd.zip
+          unzip -q /tmp/byd.zip
+          test -f byd-connected-monitor/gradlew
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Build installable APKs
+        working-directory: byd-connected-monitor
+        run: |
+          chmod +x gradlew
+          ./gradlew :car-agent:app:assembleDebug :mobile-app:app:assembleDebug --no-daemon
+          cp car-agent/app/build/outputs/apk/debug/app-debug.apk ../BYD-Car-Seal-U.apk
+          cp mobile-app/app/build/outputs/apk/debug/app-debug.apk ../BYD-Mobile-Seal-U.apk
+      - name: Verify APK files
+        run: |
+          unzip -t BYD-Car-Seal-U.apk
+          unzip -t BYD-Mobile-Seal-U.apk
+          sha256sum BYD-Car-Seal-U.apk BYD-Mobile-Seal-U.apk > SHA256SUMS.txt
+      - name: Publish public GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="seal-u-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" BYD-Car-Seal-U.apk BYD-Mobile-Seal-U.apk SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --title "BYD Seal U Android APKs" --notes "Installable test APKs for the BYD Seal U car display and Android mobile companion."
