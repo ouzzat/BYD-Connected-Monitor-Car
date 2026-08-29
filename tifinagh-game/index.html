@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tifinagh Amazigh — Jeu éducatif</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>ⵜⵉⴼⵉⵏⴰⵖ — Apprends l'alphabet Amazigh</h1>
+    <p class="soustitre">Un jeu éducatif pour découvrir le Tifinagh, l'alphabet amazigh marocain</p>
+    <nav>
+      <button class="nav-btn" data-view="accueil">Accueil</button>
+      <button class="nav-btn" data-view="apprendre">Apprendre</button>
+      <button class="nav-btn" data-view="quiz">Quiz</button>
+      <button class="nav-btn" data-view="memoire">Mémoire</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Accueil -->
+    <section id="view-accueil" class="view">
+      <div class="hero">
+        <div class="grand-tifinagh">ⴰⵥⵓⵍ</div>
+        <p>« Azul » veut dire <strong>bonjour</strong> en tamazight ! Le Tifinagh est l'alphabet
+        traditionnel utilisé pour écrire les langues amazighes, officiel au Maroc aux côtés de l'arabe.</p>
+        <p>Ce jeu te propose trois façons d'apprendre les 33 lettres du Tifinagh :
+        les découvrir une par une, tester tes connaissances en quiz, et t'amuser
+        avec un jeu de mémoire.</p>
+        <div class="cta-row">
+          <button class="primary-btn" onclick="showView('apprendre')">Découvrir les lettres</button>
+          <button class="secondary-btn" onclick="showView('quiz')">Lancer le quiz</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Apprendre -->
+    <section id="view-apprendre" class="view">
+      <h2>Découvre les lettres</h2>
+      <p style="text-align:center">Clique sur une lettre pour voir sa prononciation.</p>
+      <div id="lettres-grid" class="lettres-grid"></div>
+      <div id="lettre-detail"></div>
+    </section>
+
+    <!-- Quiz -->
+    <section id="view-quiz" class="view">
+      <h2>Quiz</h2>
+      <div class="quiz-box">
+        <div id="quiz-question">
+          <div class="quiz-meta">
+            <span id="quiz-progress">Question 1 / 12</span>
+            <span id="quiz-score">Score : 0</span>
+          </div>
+          <p>Quelle est la lettre latine correspondante ?</p>
+          <div id="quiz-lettre" class="quiz-lettre"></div>
+          <div id="quiz-options" class="quiz-options"></div>
+          <div id="quiz-feedback" class="quiz-feedback"></div>
+        </div>
+        <div id="quiz-result"></div>
+      </div>
+    </section>
+
+    <!-- Mémoire -->
+    <section id="view-memoire" class="view">
+      <h2>Jeu de mémoire</h2>
+      <p style="text-align:center">Retrouve les paires lettre Tifinagh ↔ lettre latine.</p>
+      <div class="controls-row">
+        <button id="memory-restart" class="primary-btn">Nouvelle partie</button>
+      </div>
+      <div id="memory-status" class="memory-status"></div>
+      <div id="memory-board" class="memory-board"></div>
+      <div id="memory-win">
+        <h3>Bravo, toutes les paires sont trouvées !</h3>
+        <p>Nombre de coups : <span id="memory-win-moves"></span></p>
+      </div>
+    </section>
+  </main>
+
+  <footer>Jeu éducatif Tifinagh — apprends l'alphabet amazigh marocain en t'amusant.</footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
