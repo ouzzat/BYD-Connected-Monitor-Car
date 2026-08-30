@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ASMONTEC — Fabricating the Stage for Your Vision</title>
+<link rel="icon" href="assets/asmontec-logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Quantico:wght@400;700&display=swap" rel="stylesheet">
@@ -20,9 +21,17 @@
     --gutter:clamp(20px,9vw,118px);
     --indent:min(238px,28vw);
     --indent-sm:min(160px,18vw);
+    /* set per frame by the scroll engine */
+    --hero-shift:0px;
+    --hero-fade:1;
+    --hero-lift:0px;
+    --about-shift:0px;
+    --ease-cine:cubic-bezier(0.16,0.84,0.30,1);
   }
 
   *,*::before,*::after{box-sizing:border-box;}
+
+  html{scroll-behavior:smooth;}
 
   html,body{margin:0;padding:0;}
 
@@ -42,6 +51,46 @@
     color:var(--heading);
     font-weight:700;
     margin:0;
+  }
+
+  /* ---------------- Cinematic reveal primitives ---------------- */
+
+  /* Reveals run as keyframe animations rather than transitions: elements
+     like .btn-primary carry their own `transition` shorthand for hover, and
+     a transition-based reveal would be overwritten by it. `backwards` fill
+     holds the start frame through the stagger delay, and once the run ends
+     the element falls back to its own styles so hover still transitions. */
+  .line{display:block;}
+
+  .masked .line{overflow:hidden;}
+
+  .line-in{
+    display:block;
+    transform:translateY(110%);
+    opacity:0;
+  }
+
+  .in .line-in{
+    transform:none;
+    opacity:1;
+    animation:lineIn 1.15s var(--ease-cine) var(--d,0ms) backwards;
+  }
+
+  @keyframes lineIn{
+    from{transform:translateY(110%);opacity:0;}
+    to{transform:translateY(0);opacity:1;}
+  }
+
+  .rise{opacity:0;}
+
+  .rise.in{
+    opacity:1;
+    animation:rise 1.05s var(--ease-cine) var(--d,0ms) backwards;
+  }
+
+  @keyframes rise{
+    from{transform:translateY(34px);opacity:0;}
+    to{transform:translateY(0);opacity:1;}
   }
 
   /* ---------------- Section 1 — Hero ---------------- */
@@ -64,6 +113,9 @@
     object-fit:contain;
     pointer-events:none;
     z-index:0;
+    transform:translate3d(0,var(--hero-shift),0) scale(var(--hero-scale,1));
+    transform-origin:70% 30%;
+    will-change:transform;
   }
 
   .hero-scrim{
@@ -92,37 +144,14 @@
   .brand{
     display:flex;
     align-items:center;
-    gap:12px;
     text-decoration:none;
-  }
-
-  .brand-mark{
-    width:38px;
-    height:38px;
-    border-radius:50%;
-    background:#111;
-    display:flex;
-    align-items:center;
-    justify-content:center;
     flex:0 0 auto;
   }
 
-  .brand-mark span{
+  .brand-logo{
+    height:clamp(42px,7vw,60px);
+    width:auto;
     display:block;
-    width:20px;
-    height:8px;
-    border-radius:50%;
-    background:#fff;
-    transform:rotate(-25deg);
-  }
-
-  .brand-name{
-    font-size:clamp(22px,5vw,30px);
-    font-weight:400;
-    color:#111;
-    letter-spacing:-0.5px;
-    text-transform:lowercase;
-    line-height:1;
   }
 
   .nav-links{
@@ -132,6 +161,7 @@
   }
 
   .nav-links a{
+    position:relative;
     font-weight:700;
     font-size:clamp(12px,2.4vw,15px);
     letter-spacing:0.06em;
@@ -139,9 +169,24 @@
     text-decoration:none;
     white-space:nowrap;
     text-transform:uppercase;
+    padding-bottom:4px;
+  }
+
+  /* underline wipes out from the centre on hover */
+  .nav-links a::after{
+    content:"";
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:0;
+    height:1px;
+    background:var(--accent);
+    transform:scaleX(0);
+    transition:transform 0.45s var(--ease-cine);
   }
 
   .nav-links a:hover{color:#111;}
+  .nav-links a:hover::after{transform:scaleX(1);}
 
   .nav-contact{
     margin-left:auto;
@@ -160,7 +205,7 @@
     cursor:pointer;
     text-decoration:none;
     clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));
-    transition:background 0.2s ease;
+    transition:background 0.35s ease;
   }
 
   .nav-contact:hover{background:rgba(255,255,255,0.14);}
@@ -183,7 +228,12 @@
     width:22px;
     height:2px;
     background:#fff;
+    transition:transform 0.4s var(--ease-cine),opacity 0.25s ease;
   }
+
+  .nav-toggle.open span:nth-child(1){transform:translateY(7px) rotate(45deg);}
+  .nav-toggle.open span:nth-child(2){opacity:0;}
+  .nav-toggle.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg);}
 
   .nav-mobile-menu{
     display:none;
@@ -200,9 +250,16 @@
     text-transform:uppercase;
     letter-spacing:0.06em;
     font-size:15px;
+    opacity:0;
+    transform:translateY(-10px);
+    transition:opacity 0.4s ease,transform 0.5s var(--ease-cine);
   }
 
   .nav-mobile-menu.open{display:flex;}
+  .nav-mobile-menu.open a{opacity:1;transform:translateY(0);}
+  .nav-mobile-menu.open a:nth-child(1){transition-delay:60ms;}
+  .nav-mobile-menu.open a:nth-child(2){transition-delay:120ms;}
+  .nav-mobile-menu.open a:nth-child(3){transition-delay:180ms;}
 
   /* Headline */
 
@@ -213,6 +270,9 @@
     flex-direction:column;
     flex:1 1 auto;
     justify-content:flex-end;
+    transform:translate3d(0,var(--hero-lift),0);
+    opacity:var(--hero-fade);
+    will-change:transform,opacity;
   }
 
   .hero-title{
@@ -220,13 +280,13 @@
     font-size:min(clamp(34px,7.6vw,80px),9.2vh);
   }
 
-  .hero-title .line{display:block;}
   .hero-title .line.indent{margin-left:var(--indent);}
   .hero-title .accent{color:var(--accent);}
 
   /* Buttons */
 
   .btn-primary{
+    position:relative;
     display:inline-flex;
     align-items:center;
     gap:14px;
@@ -242,15 +302,35 @@
     cursor:pointer;
     text-decoration:none;
     align-self:flex-start;
+    overflow:hidden;
     clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));
     box-shadow:0 0 0 1px rgba(21,188,223,0.35),0 10px 30px -12px rgba(15,163,194,0.6);
-    transition:background 0.2s ease,box-shadow 0.2s ease;
+    transition:background 0.4s ease,box-shadow 0.4s ease,transform 0.4s var(--ease-cine);
   }
 
   .btn-primary:hover{
     background:var(--accent-hover);
     box-shadow:0 0 0 1px rgba(21,188,223,0.55),0 14px 40px -10px rgba(15,163,194,0.85);
+    transform:translateY(-2px);
   }
+
+  /* light sweep across the button on hover */
+  .btn-primary::before{
+    content:"";
+    position:absolute;
+    top:0;
+    bottom:0;
+    left:-60%;
+    width:45%;
+    background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.55) 50%,rgba(255,255,255,0) 100%);
+    transform:skewX(-18deg);
+    transition:left 0.75s var(--ease-cine);
+    pointer-events:none;
+  }
+
+  .btn-primary:hover::before{left:120%;}
+
+  .btn-primary span{position:relative;}
 
   .btn-primary i{
     display:block;
@@ -258,10 +338,62 @@
     height:1px;
     background:var(--dark-text);
     flex:0 0 auto;
+    transition:width 0.4s var(--ease-cine);
   }
+
+  .btn-primary:hover i{width:32px;}
 
   .hero-cta{
     margin:0 0 min(clamp(36px,6vw,80px),7vh) calc(clamp(20px,9vw,118px) + min(238px,28vw));
+  }
+
+  /* Scroll cue */
+
+  .scroll-cue{
+    position:absolute;
+    right:clamp(20px,4vw,48px);
+    bottom:min(clamp(36px,6vw,80px),7vh);
+    z-index:2;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:0.22em;
+    text-transform:uppercase;
+    color:var(--body-gray);
+    pointer-events:none;
+  }
+
+  .cue-inner{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    opacity:var(--cue-fade,1);
+  }
+
+  .scroll-cue .rail{
+    position:relative;
+    width:1px;
+    height:56px;
+    background:rgba(107,111,114,0.3);
+    overflow:hidden;
+  }
+
+  .scroll-cue .rail::after{
+    content:"";
+    position:absolute;
+    left:0;
+    width:1px;
+    height:20px;
+    background:var(--accent);
+    animation:cue 2.4s var(--ease-cine) infinite;
+  }
+
+  @keyframes cue{
+    0%{transform:translateY(-24px);}
+    60%{transform:translateY(56px);}
+    100%{transform:translateY(56px);}
   }
 
   /* ---------------- Section 2 — About ---------------- */
@@ -286,7 +418,6 @@
     font-size:clamp(34px,6.5vw,72px);
   }
 
-  .about-title .line{display:block;}
   .about-title .line.indent{margin-left:var(--indent-sm);}
   .about-title .accent{color:var(--accent);}
 
@@ -310,19 +441,36 @@
     justify-content:flex-end;
   }
 
+  /* The parallax drift lives on the wrapper so the video and its hue
+     overlay always move as one and stay exactly aligned. The clip-path
+     doubles as the entrance wipe and as the guarantee that the scaled
+     video never spills past the overlay. */
   .about-media{
     position:relative;
     width:100%;
     max-width:644px;
     line-height:0;
+    /* overflow, not just the clip-path: a clipped element still contributes
+       layout overflow, and the pre-reveal scale would widen the page */
+    overflow:hidden;
+    clip-path:inset(0 0 0 100%);
+    transform:translate3d(0,var(--about-shift),0);
+    transition:clip-path 1.3s var(--ease-cine);
+    will-change:transform;
   }
+
+  .about-media.in{clip-path:inset(0 0 0 0%);}
 
   .about-media video{
     width:100%;
     max-width:644px;
     height:auto;
     display:block;
+    scale:1.06;
+    transition:scale 1.4s var(--ease-cine);
   }
+
+  .about-media.in video{scale:1;}
 
   .about-media .hue-overlay{
     position:absolute;
@@ -351,6 +499,8 @@
 
     .nav-toggle{display:flex;}
 
+    .scroll-cue{display:none;}
+
     .hero-body{justify-content:flex-start;}
 
     .hero-title{
@@ -365,24 +515,48 @@
       margin-left:calc(20px + var(--indent));
     }
   }
+
+  /* ---------------- Motion off ---------------- */
+
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto;}
+
+    .line-in,.rise,.about-media,.about-media video,.btn-primary,
+    .nav-links a::after,.nav-toggle span,.nav-mobile-menu a{
+      transition:none !important;
+    }
+
+    .in .line-in,.rise.in{animation:none !important;}
+
+    .line-in,.rise,.nav-mobile-menu.open a{opacity:1 !important;transform:none !important;}
+
+    .about-media{clip-path:none !important;transform:none !important;}
+
+    .about-media video{scale:1 !important;}
+
+    .cue-inner{opacity:1 !important;}
+
+    .scroll-cue .rail::after{animation:none;}
+
+    .hero-video,.hero-body{transform:none !important;opacity:1 !important;}
+  }
 </style>
 </head>
 <body>
 
 <!-- ============ Section 1 — Hero ============ -->
-<section class="hero">
+<section class="hero" id="hero">
   <video class="hero-video" id="heroVideo" autoplay muted loop playsinline preload="auto"
     src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260823_050407_500d0339-ab28-41c1-9688-132a74a3b5aa.mp4"></video>
   <div class="hero-scrim"></div>
 
   <nav class="nav">
-    <a class="brand" href="#">
-      <span class="brand-mark"><span></span></span>
-      <span class="brand-name">asmontec</span>
+    <a class="brand rise" style="--d:80ms" href="#hero">
+      <img class="brand-logo" src="assets/asmontec-logo.png" alt="ASMONTEC EventsDeco">
     </a>
 
-    <div class="nav-links">
-      <a href="#">Home</a>
+    <div class="nav-links rise" style="--d:180ms">
+      <a href="#hero">Home</a>
       <a href="#about">About</a>
       <a href="#">Contact us</a>
     </div>
@@ -391,7 +565,7 @@
       <span></span><span></span><span></span>
     </button>
 
-    <a class="nav-contact" href="#">
+    <a class="nav-contact rise" style="--d:260ms" href="#">
       <svg width="17" height="13" viewBox="0 0 17 13" fill="none" stroke="#fff" stroke-width="1.4"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <rect x="0.7" y="0.7" width="15.6" height="11.6"></rect>
@@ -401,45 +575,49 @@
     </a>
 
     <div class="nav-mobile-menu" id="navMobileMenu">
-      <a href="#">Home</a>
+      <a href="#hero">Home</a>
       <a href="#about">About</a>
       <a href="#">Contact us</a>
     </div>
   </nav>
 
   <div class="hero-body">
-    <h1 class="hero-title">
-      <span class="line">Fabricating</span>
-      <span class="line">The</span>
-      <span class="line">Stage</span>
-      <span class="line indent">For</span>
-      <span class="line indent">Your</span>
-      <span class="line indent accent">Vision</span>
+    <h1 class="hero-title masked" data-reveal>
+      <span class="line"><span class="line-in" style="--d:220ms">Fabricating</span></span>
+      <span class="line"><span class="line-in" style="--d:320ms">The</span></span>
+      <span class="line"><span class="line-in" style="--d:420ms">Stage</span></span>
+      <span class="line indent"><span class="line-in" style="--d:540ms">For</span></span>
+      <span class="line indent"><span class="line-in" style="--d:640ms">Your</span></span>
+      <span class="line indent accent"><span class="line-in" style="--d:740ms">Vision</span></span>
     </h1>
 
-    <a class="btn-primary hero-cta" href="#about">Get started<i></i></a>
+    <a class="btn-primary hero-cta rise" style="--d:920ms" href="#about"><span>Get started</span><i></i></a>
+  </div>
+
+  <div class="scroll-cue rise" style="--d:1100ms">
+    <span class="cue-inner"><span>Scroll</span><span class="rail"></span></span>
   </div>
 </section>
 
 <!-- ============ Section 2 — About ============ -->
 <section class="about" id="about">
   <div class="about-left">
-    <h2 class="about-title">
-      <span class="line">About</span>
-      <span class="line indent accent">Asmontec</span>
+    <h2 class="about-title masked" data-reveal>
+      <span class="line"><span class="line-in">About</span></span>
+      <span class="line indent accent"><span class="line-in" style="--d:130ms">Asmontec</span></span>
     </h2>
 
-    <p class="about-text">
+    <p class="about-text rise" style="--d:260ms">
       ASMONTEC builds the immersive environments modern events rely on. From massive modular
       platforms to intricate CNC-cut panels, we make sure your high-tech decor integrates
       flawlessly. Glowing microcontrollers, stunning lighting, zero surprises.
     </p>
 
-    <a class="btn-primary about-cta" href="#">Learn more<i></i></a>
+    <a class="btn-primary about-cta rise" style="--d:380ms" href="#"><span>Learn more</span><i></i></a>
   </div>
 
   <div class="about-right">
-    <div class="about-media">
+    <div class="about-media" data-reveal>
       <video id="aboutVideo" autoplay muted loop playsinline preload="auto"
         src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260823_063501_2e2c8971-de1e-473a-8611-a0c9ae7ee186.mp4"></video>
       <div class="hue-overlay"></div>
@@ -448,45 +626,177 @@
 </section>
 
 <script>
-  (function () {
-    var toggle = document.getElementById('navToggle');
-    var menu = document.getElementById('navMobileMenu');
+(function () {
+  'use strict';
 
-    toggle.addEventListener('click', function () {
-      var open = menu.classList.toggle('open');
-      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- mobile menu ---------- */
+
+  var toggle = document.getElementById('navToggle');
+  var menu = document.getElementById('navMobileMenu');
+
+  toggle.addEventListener('click', function () {
+    var open = menu.classList.toggle('open');
+    toggle.classList.toggle('open', open);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  menu.addEventListener('click', function (e) {
+    if (e.target.tagName === 'A') {
+      menu.classList.remove('open');
+      toggle.classList.remove('open');
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  /* ---------- video playback ---------- */
+
+  var videos = [document.getElementById('heroVideo'), document.getElementById('aboutVideo')];
+
+  function tryPlay() {
+    videos.forEach(function (v) {
+      if (!v) return;
+      v.muted = true;
+      var p = v.play();
+      if (p && typeof p.catch === 'function') p.catch(function () {});
     });
+  }
 
-    menu.addEventListener('click', function (e) {
-      if (e.target.tagName === 'A') {
-        menu.classList.remove('open');
-        toggle.setAttribute('aria-expanded', 'false');
+  tryPlay();
+  setInterval(tryPlay, 1000);
+
+  function once() {
+    tryPlay();
+    document.removeEventListener('click', once);
+    document.removeEventListener('touchstart', once);
+  }
+
+  document.addEventListener('click', once);
+  document.addEventListener('touchstart', once);
+
+  /* ---------- entrance + on-scroll reveals ---------- */
+
+  var revealTargets = [].slice.call(document.querySelectorAll('.rise, [data-reveal]'));
+
+  function show(el) {
+    el.classList.add('in');
+    // drop the mask once the staggered run is done so no glyph stays clipped
+    if (el.classList.contains('masked')) {
+      var lines = el.querySelectorAll('.line-in');
+      var last = lines[lines.length - 1];
+      var clear = function () { el.classList.remove('masked'); };
+      if (last) {
+        last.addEventListener('animationend', clear, { once: true });
+        setTimeout(clear, 2600);
+      } else {
+        clear();
+      }
+    }
+  }
+
+  var pending = [];
+
+  if (reduced) {
+    revealTargets.forEach(show);
+  } else {
+    revealTargets.forEach(function (el) {
+      // hero furniture is above the fold — run it immediately on load
+      if (el.closest('.hero')) {
+        requestAnimationFrame(function () { requestAnimationFrame(function () { show(el); }); });
+      } else {
+        pending.push(el);
       }
     });
+  }
 
-    var videos = [document.getElementById('heroVideo'), document.getElementById('aboutVideo')];
+  /* Reveals are driven off the element's layout rect rather than an
+     IntersectionObserver: .about-media hides itself with a clip-path, and
+     a clipped element reports no intersection, so it could never trigger
+     its own reveal. */
+  function checkReveals() {
+    if (!pending.length) return;
+    var vh = window.innerHeight || 0;
+    for (var i = pending.length - 1; i >= 0; i--) {
+      var r = pending[i].getBoundingClientRect();
+      if (r.top < vh * 0.88 && r.bottom > 0) {
+        show(pending[i]);
+        pending.splice(i, 1);
+      }
+    }
+  }
 
-    function tryPlay() {
-      videos.forEach(function (v) {
-        if (!v) return;
-        v.muted = true;
-        var p = v.play();
-        if (p && typeof p.catch === 'function') p.catch(function () {});
-      });
+  /* ---------- scroll engine ----------
+     One rAF loop. A smoothed (lerped) scroll position gives the drift its
+     weight; every value is written as a custom property so the compositor
+     only ever sees transform/opacity. */
+
+  if (reduced) return;
+
+  var root = document.documentElement;
+  var hero = document.getElementById('hero');
+  var aboutMedia = document.querySelector('.about-media');
+
+  var target = window.scrollY || 0;
+  var eased = target;
+  var ticking = false;
+
+  function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+  function frame() {
+    eased += (target - eased) * 0.11;
+    if (Math.abs(target - eased) < 0.08) eased = target;
+
+    var heroH = hero.offsetHeight || 1;
+    var p = clamp(eased / heroH, 0, 1);          // progress through the hero
+
+    root.style.setProperty('--hero-shift', (eased * 0.26).toFixed(2) + 'px');
+    root.style.setProperty('--hero-scale', (1 + p * 0.06).toFixed(4));
+    root.style.setProperty('--hero-lift', (-eased * 0.16).toFixed(2) + 'px');
+    // headline holds full strength until it is genuinely on its way out,
+    // then dissolves as the lift carries it off the top edge
+    root.style.setProperty('--hero-fade', (1 - clamp((p - 0.35) / 0.5, 0, 1)).toFixed(3));
+    root.style.setProperty('--cue-fade', (1 - clamp(p * 4, 0, 1)).toFixed(3));
+
+    if (aboutMedia) {
+      var r = aboutMedia.getBoundingClientRect();
+      var vh = window.innerHeight || 1;
+      if (r.bottom > -200 && r.top < vh + 200) {
+        // -1 above the fold .. +1 below it
+        var q = ((r.top + r.height / 2) - vh / 2) / (vh / 2 + r.height / 2);
+        root.style.setProperty('--about-shift', (clamp(q, -1, 1) * 34).toFixed(2) + 'px');
+      }
     }
 
-    tryPlay();
-    setInterval(tryPlay, 1000);
+    checkReveals();
 
-    function once() {
-      tryPlay();
-      document.removeEventListener('click', once);
-      document.removeEventListener('touchstart', once);
+    if (eased !== target) {
+      requestAnimationFrame(frame);
+    } else {
+      ticking = false;
     }
+  }
 
-    document.addEventListener('click', once);
-    document.addEventListener('touchstart', once);
-  })();
+  function onScroll() {
+    target = window.scrollY || 0;
+    if (!ticking) {
+      ticking = true;
+      requestAnimationFrame(frame);
+    }
+    checkReveals();
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  window.addEventListener('load', onScroll);
+
+  // video metadata arriving changes the page height, which moves everything
+  videos.forEach(function (v) {
+    if (v) v.addEventListener('loadedmetadata', onScroll);
+  });
+
+  onScroll();
+})();
 </script>
 
 </body>
